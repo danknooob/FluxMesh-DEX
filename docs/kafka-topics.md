@@ -12,14 +12,14 @@
 | balances.updated  | Settlement    | Indexer, Notification        | Balance changes                  |
 | notifications.user| Various       | Notification service         | User-targeted notifications      |
 
-## Control plane (MCP)
+## Control plane
 
 | Topic           | Producer           | Consumers              | Purpose                          |
 |-----------------|--------------------|-------------------------|----------------------------------|
-| control.config  | MCP                | All data-plane services | Config, feature flags, markets   |
-| control.health  | Data-plane services| MCP                     | Heartbeats / health              |
-| control.audit   | MCP                | —                       | Immutable audit log              |
-| control.commands| MCP                | Data-plane services     | Pause market, safe mode, etc.    |
+| control.config  | Control plane      | All data-plane services | Config, feature flags, markets   |
+| control.health  | Data-plane services| Control plane           | Heartbeats / health              |
+| control.audit   | Control plane      | —                       | Immutable audit log              |
+| control.commands| Control plane      | Data-plane services     | Pause market, safe mode, etc.    |
 
 ## Consumer groups
 

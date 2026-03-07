@@ -28,7 +28,7 @@ func main() {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	log.Printf("MCP control plane listening on :%s", cfg.HTTPPort)
+	log.Printf("Control plane API listening on :%s", cfg.HTTPPort)
 	if err := http.ListenAndServe(":"+cfg.HTTPPort, mux); err != nil {
 		log.Fatalf("serve: %v", err)
 	}

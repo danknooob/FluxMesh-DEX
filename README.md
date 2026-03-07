@@ -1,13 +1,14 @@
 # FluxMesh DEX — Event-Driven Order-Book DEX
 
-Production-grade, event-driven order-book DEX backend with Kafka data plane and an MCP (Microservice Control Plane) for config, health, and operations.
+Production-grade, event-driven order-book DEX backend with Kafka data plane, a control plane for config/health/operations, and an **MCP (Model Context Protocol)** server so AI assistants can query markets, balances, and health.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CONTROL PLANE (MCP)                                │
+│                         CONTROL PLANE + MCP                                  │
 │  Config • Health • Feature flags • Audit • Admin API                         │
+│  MCP server: tools for AI (get_markets, get_balances, get_health)            │
 │  Topics: control.config, control.health, control.audit, control.commands     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
@@ -25,7 +26,8 @@ Production-grade, event-driven order-book DEX backend with Kafka data plane and 
 ```
 
 - **Data plane**: MVC API, matching engine, settlement, indexer, notification service — all over Kafka + Postgres.
-- **Control plane (MCP)**: Configuration, service registry/health, audit, and operational commands.
+- **Control plane**: Configuration, service registry/health, audit, and operational commands.
+- **MCP (Model Context Protocol)**: Server exposing DEX tools (markets, balances, health) for AI clients (e.g. Cursor, Claude).
 
 ## Repo Layout
 
@@ -37,8 +39,8 @@ Production-grade, event-driven order-book DEX backend with Kafka data plane and 
 | `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` |
 | `indexer/` | Blockchain + `trades.settled` → Postgres read models |
 | `notification/` | WebSocket service; consumes domain + notification topics |
-| `mcp/` | Control plane: config CRUD, health dashboard, control.* topics |
-| `frontend/` | React — Trader UI + Admin UI for MCP |
+| `mcp/` | Control plane HTTP API + MCP (Model Context Protocol) server with DEX tools for AI |
+| `frontend/` | React — Trader UI + Admin UI for control plane |
 
 ## Kafka Topics
 
@@ -51,10 +53,10 @@ Production-grade, event-driven order-book DEX backend with Kafka data plane and 
 | `trades.settled` | Settlement | Indexer, Notification | On-chain settlement done |
 | `balances.updated` | Settlement | Indexer, Notification | Balance changes |
 | `notifications.user` | Various | Notification service | User-targeted notifications |
-| `control.config` | MCP | All data-plane services | Config/feature flags |
-| `control.health` | Data-plane services | MCP | Heartbeats/health |
-| `control.audit` | MCP | — | Immutable audit log |
-| `control.commands` | MCP | Data-plane services | Pause market, safe mode, etc. |
+| `control.config` | Control plane | All data-plane services | Config/feature flags |
+| `control.health` | Data-plane services | Control plane | Heartbeats/health |
+| `control.audit` | Control plane | — | Immutable audit log |
+| `control.commands` | Control plane | Data-plane services | Pause market, safe mode, etc. |
 
 ## Quick Start
 
@@ -74,22 +76,30 @@ Production-grade, event-driven order-book DEX backend with Kafka data plane and 
    cd frontend && npm install && npm run dev
    ```
 
-4. **MCP control plane**
+4. **Control plane (admin API)**
    ```bash
    cd mcp && go mod tidy && go run ./cmd/mcp
    ```
+
+5. **MCP server (Model Context Protocol — for AI assistants)**
+   ```bash
+   cd mcp && go run ./cmd/fluxmesh-mcp
+   ```
+   Exposes tools over stdio for Cursor/Claude etc. (e.g. `get_markets`, `get_health`).
 
 ## Tradeoffs & Design Notes
 
 - **Event-driven vs synchronous**: Orders are accepted via API and processed asynchronously via Kafka; clients get real-time updates via WebSocket. This improves throughput and decouples services.
 - **Why Kafka**: Durable, ordered event log; replay and multiple consumers; aligns with control plane broadcasting config/commands.
-- **What MCP controls**: Markets (enabled/params), risk limits, feature flags, service health view, audit trail, and operational commands (e.g. pause market, safe mode).
+- **Control plane**: Markets (enabled/params), risk limits, feature flags, service health view, audit trail, and operational commands (e.g. pause market, safe mode).
+- **MCP (Model Context Protocol)**: Lets AI tools interact with the DEX (query markets, balances, health) without building custom integrations.
 
 ## Docs & Diagrams
 
 - `docs/architecture.md` — Data plane vs control plane.
 - `docs/sequence-order-lifecycle.md` — Order lifecycle.
 - `docs/sequence-config-lifecycle.md` — Config change lifecycle.
+- `docs/mcp-model-context-protocol.md` — MCP (Model Context Protocol) server and tools for AI.
 
 ## License
 

@@ -10,7 +10,7 @@ export function AdminLayout() {
         alignItems: 'center',
         gap: '1.5rem',
       }}>
-        <NavLink to="/admin" style={{ fontWeight: 700, fontSize: '1.25rem' }}>FluxMesh Admin (MCP)</NavLink>
+        <NavLink to="/admin" style={{ fontWeight: 700, fontSize: '1.25rem' }}>FluxMesh Admin</NavLink>
         <nav style={{ display: 'flex', gap: '1rem' }}>
           <NavLink to="/admin/markets" style={({ isActive }) => ({ color: isActive ? '#38bdf8' : '#94a3b8' })}>Config</NavLink>
           <NavLink to="/admin/health" style={({ isActive }) => ({ color: isActive ? '#38bdf8' : '#94a3b8' })}>Health</NavLink>

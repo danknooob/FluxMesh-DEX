@@ -2,7 +2,7 @@ package config
 
 import "os"
 
-// Config holds MCP server configuration.
+// Config holds control-plane HTTP server configuration.
 type Config struct {
 	HTTPPort string
 	DB       string

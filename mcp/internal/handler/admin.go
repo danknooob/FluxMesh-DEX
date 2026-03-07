@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// AdminHandler serves MCP admin API (config, health view).
+// AdminHandler serves control-plane admin API (config, health view).
 type AdminHandler struct{}
 
 // Config returns current config view (placeholder).
