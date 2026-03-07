@@ -1,0 +1,12 @@
+{
+  "name": "fluxmesh-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "hardhat": "^2.19.0"
+  }
+}

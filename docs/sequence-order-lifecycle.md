@@ -1,0 +1,35 @@
+# Sequence: Order Lifecycle
+
+```
+Client          API           Postgres      Kafka           Matching        Settlement      EVM
+  │              │                │            │                │                │            │
+  │  POST /orders │                │            │                │                │            │
+  │─────────────▶│                │            │                │                │            │
+  │              │  validate+auth │            │                │                │            │
+  │              │────────────────────────────▶│                │                │            │
+  │              │  persist order │            │                │                │            │
+  │              │◀───────────────│            │                │                │            │
+  │              │  orders.created            │                │                │            │
+  │              │────────────────────────────▶│                │                │            │
+  │  202 Accepted│                │            │  consume       │                │            │
+  │◀─────────────│                │            │───────────────────────────────▶│            │
+  │              │                │            │                │  match        │            │
+  │              │                │            │                │  order book   │            │
+  │              │                │            │  orders.matched│                │            │
+  │              │                │            │◀───────────────│                │            │
+  │              │                │            │  consume       │                │            │
+  │              │                │            │─────────────────────────────────────────────▶│
+  │              │                │            │                │                │ settleTrades
+  │              │                │            │                │                │───────────▶│
+  │              │                │            │                │                │◀───────────│
+  │              │                │            │  trades.settled│                │            │
+  │              │                │            │◀───────────────│                │            │
+  │  WebSocket   │                │            │                │                │            │
+  │  order fill  │                │            │  Notification │                │            │
+  │◀─────────────────────────────────────────────────────────────────────────────────────────
+```
+
+- **POST /orders**: API validates, persists, publishes `orders.created`; returns 202.
+- **Matching engine**: Consumes `orders.created`, matches; publishes `orders.matched` or `orders.rejected`.
+- **Settlement**: Consumes `orders.matched`, batches, calls EVM; publishes `trades.settled` and `balances.updated`.
+- **Client**: Receives real-time updates via Notification/WebSocket service.
