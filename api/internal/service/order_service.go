@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/kafka"
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
@@ -74,7 +75,9 @@ func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrde
 		"remaining": o.Remaining,
 	}
 	if err := s.producer.PublishOrderCreated(ctx, event); err != nil {
-		return o, err
+		// Log and still return the order so callers can see the accepted order,
+		// even if the event failed to publish.
+		log.Printf("publish orders.created failed: %v", err)
 	}
 	return o, nil
 }
