@@ -11,18 +11,18 @@ import (
 
 // OrderService implements order creation and cancellation.
 type OrderService struct {
-	repo     *repository.OrderRepository
-	marketRepo *repository.MarketRepository
-	producer *kafka.Producer
+	repo       *repository.OrderRepository
+	markets    MarketService
+	producer   *kafka.Producer
 }
 
 // NewOrderService creates an OrderService.
 func NewOrderService(
 	repo *repository.OrderRepository,
-	marketRepo *repository.MarketRepository,
+	markets MarketService,
 	producer *kafka.Producer,
 ) *OrderService {
-	return &OrderService{repo: repo, marketRepo: marketRepo, producer: producer}
+	return &OrderService{repo: repo, markets: markets, producer: producer}
 }
 
 // CreateLimitOrderRequest is the input for creating a limit order.
@@ -36,7 +36,7 @@ type CreateLimitOrderRequest struct {
 
 // CreateLimitOrder validates, persists, and publishes orders.created.
 func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrderRequest) (*models.Order, error) {
-	market, err := s.marketRepo.GetByID(ctx, req.MarketID)
+	market, err := s.markets.GetMarket(ctx, req.MarketID)
 	if err != nil || market == nil {
 		return nil, err
 	}

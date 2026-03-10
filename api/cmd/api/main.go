@@ -5,11 +5,14 @@ import (
 	"net/http"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/config"
+	"github.com/danknooob/fluxmesh-dex/api/internal/dbseed"
 	"github.com/danknooob/fluxmesh-dex/api/internal/handler"
 	"github.com/danknooob/fluxmesh-dex/api/internal/kafka"
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
 	"github.com/danknooob/fluxmesh-dex/api/internal/repository"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -25,35 +28,40 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 
+	if err := dbseed.SeedInitialMarkets(db); err != nil {
+		log.Printf("seed markets: %v", err)
+	}
+
 	producer := kafka.NewProducer(cfg.Kafka.Brokers)
 	defer producer.Close()
 
 	orderRepo := repository.NewOrderRepository(db)
 	marketRepo := repository.NewMarketRepository(db)
-	orderSvc := service.NewOrderService(orderRepo, marketRepo, producer)
+	marketSvc := service.NewMarketService(marketRepo)
+	orderSvc := service.NewOrderService(orderRepo, marketSvc, producer)
 
 	orderCtrl := handler.NewOrderController(orderSvc)
-	marketCtrl := handler.NewMarketController(marketRepo)
+	marketCtrl := handler.NewMarketController(marketSvc)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /orders", orderCtrl.Create)
-	mux.HandleFunc("/orders/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			orderCtrl.Delete(w, r)
-			return
-		}
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-	})
-	mux.HandleFunc("GET /markets", marketCtrl.List)
+	r := chi.NewRouter()
+	r.Use(middleware.StripSlashes)
+
+	// Trader-facing APIs
+	r.Method(http.MethodPost, "/orders", http.HandlerFunc(orderCtrl.Create))
+	r.Method(http.MethodDelete, "/orders/{id}", http.HandlerFunc(orderCtrl.Delete))
+	// Support both /markets and /markets/ explicitly to avoid confusion.
+	r.Method(http.MethodGet, "/markets", http.HandlerFunc(marketCtrl.List))
+	r.Method(http.MethodGet, "/markets/", http.HandlerFunc(marketCtrl.List))
+	r.Method(http.MethodGet, "/markets/{id}", http.HandlerFunc(marketCtrl.Get))
 
 	// GET /balances placeholder (indexer/read-model will populate)
-	mux.HandleFunc("GET /balances", func(w http.ResponseWriter, r *http.Request) {
+	r.Method(http.MethodGet, "/balances", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("[]"))
-	})
+	}))
 
 	log.Printf("API listening on :%s", cfg.HTTPPort)
-	if err := http.ListenAndServe(":"+cfg.HTTPPort, mux); err != nil {
+	if err := http.ListenAndServe(":"+cfg.HTTPPort, r); err != nil {
 		log.Fatalf("serve: %v", err)
 	}
 }
