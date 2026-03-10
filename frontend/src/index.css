@@ -27,6 +27,43 @@ a:hover {
   text-decoration: underline;
 }
 
+.primary-btn,
+.secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem 1.3rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, background-color 0.12s ease-out, border-color 0.12s ease-out;
+}
+
+.primary-btn {
+  background: #38bdf8;
+  color: #0f172a;
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.32);
+}
+
+.primary-btn:hover {
+  background: #0ea5e9;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(56, 189, 248, 0.4);
+}
+
+.secondary-btn {
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  background: transparent;
+}
+
+.secondary-btn:hover {
+  border-color: #38bdf8;
+  background: rgba(15, 23, 42, 0.85);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.7);
+}
+
 button {
   font-family: inherit;
   cursor: pointer;

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { TraderLayout } from './layouts/TraderLayout';
 import { AdminLayout } from './layouts/AdminLayout';
+import { Home } from './pages/Home';
 import { Markets } from './pages/Markets';
 import { OrderBook } from './pages/OrderBook';
 import { Balances } from './pages/Balances';
@@ -12,7 +13,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<TraderLayout />}>
-          <Route index element={<Markets />} />
+          <Route index element={<Home />} />
           <Route path="markets" element={<Markets />} />
           <Route path="markets/:marketId" element={<OrderBook />} />
           <Route path="balances" element={<Balances />} />
