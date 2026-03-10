@@ -92,3 +92,20 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userI
 		"user_id":  userID,
 	})
 }
+
+// ListOrders returns orders for a user with optional filters.
+// Later, different market types (spot, perps, etc.) can project this
+// base order stream into specialized views without changing the interface.
+func (s *OrderService) ListOrders(ctx context.Context, userID, marketID, status string) ([]models.Order, error) {
+	filter := repository.OrderFilter{
+		UserID:   userID,
+		MarketID: marketID,
+		Status:   status,
+	}
+	return s.repo.List(ctx, filter)
+}
+
+// GetOrder returns a single order by ID.
+func (s *OrderService) GetOrder(ctx context.Context, id uuid.UUID) (*models.Order, error) {
+	return s.repo.GetByID(ctx, id)
+}

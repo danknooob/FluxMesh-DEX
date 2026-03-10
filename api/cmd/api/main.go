@@ -47,6 +47,7 @@ func main() {
 	r.Use(middleware.StripSlashes)
 
 	// Trader-facing APIs
+	r.Method(http.MethodGet, "/orders", http.HandlerFunc(orderCtrl.List))
 	r.Method(http.MethodPost, "/orders", http.HandlerFunc(orderCtrl.Create))
 	r.Method(http.MethodDelete, "/orders/{id}", http.HandlerFunc(orderCtrl.Delete))
 	// Support both /markets and /markets/ explicitly to avoid confusion.
@@ -59,7 +60,7 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("[]"))
 	}))
-
+// x
 	log.Printf("API listening on :%s", cfg.HTTPPort)
 	if err := http.ListenAndServe(":"+cfg.HTTPPort, r); err != nil {
 		log.Fatalf("serve: %v", err)

@@ -3,9 +3,9 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +17,30 @@ type OrderController struct {
 // NewOrderController creates an OrderController.
 func NewOrderController(orderService *service.OrderService) *OrderController {
 	return &OrderController{orderService: orderService}
+}
+
+// List returns orders for the current user (GET /orders).
+// Filters: market_id, status via query params.
+func (c *OrderController) List(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// TODO: derive userID from auth/JWT
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		userID = "default-user"
+	}
+	marketID := r.URL.Query().Get("market_id")
+	status := r.URL.Query().Get("status")
+
+	orders, err := c.orderService.ListOrders(r.Context(), userID, marketID, status)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(orders)
 }
 
 // Create parses JSON body and creates a limit order (POST /orders).
@@ -55,7 +79,7 @@ func (c *OrderController) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	idStr := strings.TrimPrefix(r.URL.Path, "/orders/")
+	idStr := chi.URLParam(r, "id")
 	if idStr == "" {
 		http.Error(w, "missing order id", http.StatusBadRequest)
 		return
