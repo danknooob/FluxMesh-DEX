@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { apiFetch } from '../auth/api';
 
 type Market = {
   id: string;
@@ -26,7 +27,7 @@ export function OrderBook() {
   useEffect(() => {
     if (!marketId) return;
     setLoading(true);
-    fetch(`/api/markets/${encodeURIComponent(marketId)}`)
+    apiFetch(`/api/markets/${encodeURIComponent(marketId)}`)
       .then(async (r) => {
         if (!r.ok) {
           throw new Error('Market not found');
@@ -45,7 +46,7 @@ export function OrderBook() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch('/api/orders', {
+      const res = await apiFetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

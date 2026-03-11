@@ -1,58 +1,96 @@
-# System Architecture: Data Plane vs Control Plane
+# System Architecture
 
-## Data Plane (Runtime Path)
+## Overview
+
+```
+                        ┌───────────────────┐
+                        │   React Frontend  │
+                        │  (Trader + Admin) │
+                        └─────────┬─────────┘
+                                  │
+                        ┌─────────▼─────────┐
+                        │   API Gateway     │  :8000
+                        │  ┌─────────────┐  │
+                        │  │ JWT Auth     │  │
+                        │  │ Rate Limiter │  │
+                        │  └─────────────┘  │
+                        └───┬───────────┬───┘
+                            │           │
+               ┌────────────▼──┐   ┌────▼──────────────┐
+               │  API Service  │   │  Control Plane     │
+               │  :8080        │   │  :8081             │
+               │  Auth/Orders  │   │  Config · Health   │
+               │  Markets/Bal  │   │  Audit · Commands  │
+               │  Postgres     │   └────────────────────┘
+               └───────┬───────┘
+                       │  Kafka
+        ┌──────────────┼──────────────┬──────────────┐
+        ▼              ▼              ▼              ▼
+  ┌───────────┐ ┌───────────┐ ┌────────────┐ ┌────────────┐
+  │ Matching  │ │Settlement │ │Notification│ │ Event Log  │
+  │ Engine    │ │ Service   │ │ WebSocket  │ │  → MongoDB │
+  └───────────┘ └───────────┘ └────────────┘ └────────────┘
+```
+
+## Layers
+
+### Edge — API Gateway (:8000)
+
+The gateway is the single entry point for all client traffic.
+
+- **JWT authentication**: Validates `Authorization: Bearer <token>` on every protected route. Admin routes additionally require `role=admin`.
+- **Rate limiting**: Per-user token-bucket (20 req/s, burst 40) via `golang.org/x/time/rate`. Falls back to per-IP for unauthenticated endpoints.
+- **Header injection**: After validation, injects `X-User-ID` and `X-Role` headers so downstream services skip token parsing.
+- **Reverse proxy**: Routes to API Service (:8080) for trader routes, Control Plane (:8081) for admin routes.
+
+### Data Plane (Runtime Path)
 
 Services that move orders and trades:
 
-1. **MVC API** — HTTP gateway. Validates and persists orders, publishes `orders.created` to Kafka.
-2. **Matching Engine** — Consumes `orders.created`, maintains in-memory order books, emits `orders.matched` / `orders.rejected`.
+1. **API Service** — HTTP gateway. Authenticates users (bcrypt + JWT), persists orders in Postgres, publishes `orders.created` to Kafka. Trusts gateway-injected headers for user identity.
+2. **Matching Engine** — Consumes `orders.created`, maintains in-memory order books (price-time priority), emits `orders.matched` / `orders.rejected`.
 3. **Settlement** — Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades`, emits `trades.settled` and `balances.updated`.
 4. **Indexer** — Listens to chain events and `trades.settled`; updates Postgres read models (positions, balances, trade history).
-5. **Notification** — Consumes domain + `notifications.user`; holds WebSocket connections and pushes updates to clients.
+5. **Notification** — Consumes domain topics + `notifications.user`; holds WebSocket connections per user and pushes real-time updates.
+6. **Event Log** — Consumes all 11 Kafka topics and persists every event to MongoDB with a human-readable title. Serves as immutable audit trail.
 
-## Control Plane
+### Control Plane
 
-Manages the system like a cockpit:
+Manages the system:
 
 - **Configuration & desired state** — Markets, tick size, fees, risk limits, feature flags. Stored in control-plane DB; changes published to `control.config`.
-- **Service registry and health** — Services heartbeat (HTTP/gRPC or `control.health`). Control plane aggregates and exposes health in admin UI.
-- **Access and audit** — Who can change markets/risk; all changes logged to `control.audit`.
-- **Operational commands** — e.g. “pause market ETH/USDC”, “safe mode”. Control plane writes to DB + `control.commands`; data-plane services subscribe and apply.
+- **Service registry and health** — Services heartbeat via `control.health`. Control plane aggregates and exposes in admin UI.
+- **Access and audit** — All admin changes logged to `control.audit`.
+- **Operational commands** — e.g. "pause market ETH/USDC". Published to `control.commands`; data-plane services subscribe and apply.
 
-## MCP (Model Context Protocol)
+### MCP (Model Context Protocol)
 
-A separate MCP server exposes DEX capabilities to AI assistants (e.g. Cursor, Claude): tools such as `get_markets`, `get_balances`, `get_health` so AI can query the exchange without custom integrations.
+A separate MCP server exposes DEX capabilities to AI assistants (Cursor, Claude): tools like `get_markets`, `get_balances`, `get_health`.
 
-## Diagram
+## Data Stores
+
+| Store | Purpose | Data |
+|-------|---------|------|
+| **Postgres** | Source of truth | Users (bcrypt hashes), orders, markets, balances |
+| **MongoDB** | Immutable event log | Every Kafka event with topic, title, payload, timestamps |
+| **Kafka** | Event bus | Async communication between all services |
+| **In-memory** | Hot data | Order books in matching engine, rate limit buckets in gateway |
+
+## Authentication Flow
 
 ```
-                    ┌──────────────────────────────────────┐
-                    │     Control Plane + MCP server        │
-                    │  control.config │ control.health      │
-                    │  control.audit │ control.commands    │
-                    └──────────────────────────────────────┘
-                                         │
-        ┌────────────────────────────────┼────────────────────────────────┐
-        ▼                                ▼                                ▼
-┌───────────────┐              ┌─────────────────┐              ┌─────────────────┐
-│   MVC API     │──orders.created──▶│ Matching Engine │──orders.matched──▶│   Settlement   │
-│  (Gateway)    │              │  (Order books)   │              │  (EVM settle)   │
-└───────────────┘              └─────────────────┘              └────────┬────────┘
-        │                                │                                │
-        ▼                                ▼                                ▼
-   Postgres                         orders.rejected              trades.settled
-        │                                │                        balances.updated
-        └────────────────────────────────┼────────────────────────────┘
-                                         ▼
-                                ┌─────────────────┐
-                                │    Indexer      │
-                                │ (Read models)   │
-                                └────────┬────────┘
-                                         │
-        ┌────────────────────────────────┼────────────────────────────────┐
-        ▼                                ▼                                ▼
-┌───────────────┐              ┌─────────────────┐              ┌─────────────────┐
-│  Notification │◀────────────│  Kafka topics   │─────────────▶│   Trader UI     │
-│  (WebSocket)  │              │  (event log)    │              │   (React)       │
-└───────────────┘              └─────────────────┘              └─────────────────┘
+Client → POST /auth/register or /auth/login → API Service → Postgres (bcrypt)
+                                             ← JWT (HS256, 60min expiry)
+
+Client → GET /orders (Bearer token) → Gateway (validate JWT, rate limit)
+                                     → inject X-User-ID, X-Role headers
+                                     → API Service (trust headers, execute logic)
+```
+
+## Request Lifecycle
+
+```
+Client → Gateway → JWT check → Rate limit → Reverse proxy → API Service → Postgres/Kafka
+                                                           ← JSON response
+         ← JSON response (or 401/429)
 ```

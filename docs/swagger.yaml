@@ -1,0 +1,468 @@
+openapi: 3.0.3
+info:
+  title: FluxMesh DEX API
+  description: |
+    Event-driven order-book DEX with Kafka, EVM settlement, API Gateway
+    (JWT auth + rate limiting), and MongoDB event log.
+
+    All protected endpoints require `Authorization: Bearer <token>`.
+    Obtain a token via `POST /auth/login` or `POST /auth/register`.
+  version: 1.0.0
+  contact:
+    name: FluxMesh DEX
+    url: https://github.com/danknooob/FluxMesh-DEX
+
+servers:
+  - url: http://localhost:8000
+    description: API Gateway (local dev)
+  - url: http://localhost:8080
+    description: API Service (direct, behind gateway)
+
+tags:
+  - name: Auth
+    description: User registration and login
+  - name: Markets
+    description: Trading pair configuration
+  - name: Orders
+    description: Limit order placement and management
+  - name: Balances
+    description: User asset balances
+  - name: Admin
+    description: Control plane admin endpoints (admin role required)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by POST /auth/login or /auth/register
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: trader@example.com
+        password:
+          type: string
+          minLength: 6
+          example: trader123
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: newuser@example.com
+        password:
+          type: string
+          minLength: 6
+          example: mypassword
+        role:
+          type: string
+          enum: [trader, admin]
+          default: trader
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT token (HS256, 60min expiry)
+        role:
+          type: string
+          enum: [trader, admin]
+        user_id:
+          type: string
+          format: uuid
+
+    Market:
+      type: object
+      properties:
+        id:
+          type: string
+          example: BTC-USDC
+        base_asset:
+          type: string
+          example: BTC
+        quote_asset:
+          type: string
+          example: USDC
+        tick_size:
+          type: string
+          example: "0.01"
+        min_size:
+          type: string
+          example: "0.001"
+        fee_rate:
+          type: string
+          example: "0.001"
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateOrderRequest:
+      type: object
+      required: [market_id, side, price, size]
+      properties:
+        market_id:
+          type: string
+          example: BTC-USDC
+        side:
+          type: string
+          enum: [buy, sell]
+        price:
+          type: string
+          description: Limit price as decimal string
+          example: "62000.10"
+        size:
+          type: string
+          description: Order quantity as decimal string
+          example: "0.01"
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+        market_id:
+          type: string
+        side:
+          type: string
+          enum: [buy, sell]
+        type:
+          type: string
+          enum: [limit, market]
+        price:
+          type: string
+        size:
+          type: string
+        remaining:
+          type: string
+        status:
+          type: string
+          enum: [pending, matched, partial, cancelled, rejected]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: string
+      description: Plain-text error message
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT token
+      content:
+        text/plain:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: unauthorized
+    Forbidden:
+      description: Insufficient role (admin required)
+      content:
+        text/plain:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example: forbidden
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: string
+            example: "1"
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                example: rate limit exceeded, try again shortly
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Authenticate with email and password. Returns a JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid request body
+        "401":
+          description: Invalid email or password
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register
+      description: Create a new user account with bcrypt-hashed password. Returns a JWT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid body or password too short
+        "409":
+          description: Email already registered
+
+  /markets:
+    get:
+      tags: [Markets]
+      summary: List all markets
+      description: Returns all enabled trading markets.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Array of markets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Market"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /markets/{id}:
+    get:
+      tags: [Markets]
+      summary: Get a single market
+      description: Returns market details by ID (e.g. BTC-USDC).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: BTC-USDC
+      responses:
+        "200":
+          description: Market details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Market"
+        "400":
+          description: Missing market ID
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Market not found
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List orders
+      description: Returns orders for the authenticated user. Supports filtering by market and status.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: market_id
+          in: query
+          required: false
+          schema:
+            type: string
+          example: BTC-USDC
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, matched, partial, cancelled, rejected]
+      responses:
+        "200":
+          description: Array of orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Order"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    post:
+      tags: [Orders]
+      summary: Place a limit order
+      description: |
+        Creates a new limit order. The order is persisted in Postgres and
+        published to `orders.created` Kafka topic for async matching.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderRequest"
+      responses:
+        "202":
+          description: Order accepted and queued for matching
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          description: Invalid request (bad market, invalid side, etc.)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /orders/{id}:
+    delete:
+      tags: [Orders]
+      summary: Cancel an order
+      description: Cancels a pending order by ID. Only the order owner can cancel.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Order cancelled successfully
+        "400":
+          description: Missing or invalid order ID
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: Cancel failed
+
+  /balances:
+    get:
+      tags: [Balances]
+      summary: Get user balances
+      description: Returns asset balances for the authenticated user. Populated by the indexer from trades.settled / balances.updated events.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Array of balance entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    asset:
+                      type: string
+                    available:
+                      type: string
+                    locked:
+                      type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /admin/markets:
+    get:
+      tags: [Admin]
+      summary: List market config (admin)
+      description: Returns full market configuration from the control plane.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Array of market configs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Market"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /admin/health:
+    get:
+      tags: [Admin]
+      summary: Service health (admin)
+      description: Returns health status of all data-plane and control-plane services.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Health report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        status:
+                          type: string
+                          enum: [healthy, degraded, down]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"

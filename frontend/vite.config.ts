@@ -6,8 +6,16 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': { target: 'http://localhost:8080', changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '') },
-      '/control': { target: 'http://localhost:8081', changeOrigin: true, rewrite: (p) => p.replace(/^\/control/, '') },
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api/, ''),
+      },
+      '/control': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/control/, ''),
+      },
     },
   },
 });

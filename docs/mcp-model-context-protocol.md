@@ -2,17 +2,17 @@
 
 In this project **MCP** means the [Model Context Protocol](https://modelcontextprotocol.io/) (AI tools protocol), not "microservice control plane." The control plane is the HTTP admin service; MCP is how AI assistants talk to the DEX.
 
-## What we expose
+## What We Expose
 
 The **fluxmesh-mcp** binary runs an MCP server over stdio. AI clients (e.g. Cursor, Claude Desktop) can spawn it and call tools:
 
-| Tool           | Description                                      |
-|----------------|--------------------------------------------------|
-| `get_markets`  | List enabled trading markets (base/quote, fee).  |
-| `get_health`   | Control-plane and data-plane service health.    |
-| `get_balances` | User balances (placeholder; use API for live).  |
+| Tool | Description |
+|------|-------------|
+| `get_markets` | List enabled trading markets (base/quote, tick size, fee rate) |
+| `get_health` | Control-plane and data-plane service health status |
+| `get_balances` | User balances (requires `user_id` parameter) |
 
-## Running the MCP server
+## Running the MCP Server
 
 ```bash
 cd mcp && go run ./cmd/fluxmesh-mcp
@@ -20,12 +20,19 @@ cd mcp && go run ./cmd/fluxmesh-mcp
 
 The server uses stdin/stdout. Configure your AI client to run this command; it will then have access to the tools above.
 
-## Cursor
+### Environment Variables
 
-In Cursor you can add a custom MCP server that runs `go run ./cmd/fluxmesh-mcp` (or the built binary) from the repo root so the AI can query markets and health.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `API_BASE_URL` | `http://localhost:8080` | API service endpoint |
+| `CONTROL_BASE_URL` | `http://localhost:8081` | Control plane endpoint |
+
+## Cursor Integration
+
+In Cursor, add a custom MCP server that runs `go run ./cmd/fluxmesh-mcp` (or the built binary) from the `mcp/` directory.
 
 ## Implementation
 
 - **SDK**: `github.com/modelcontextprotocol/go-sdk`
-- **Transport**: stdio (one process per client connection).
-- **Tools**: Currently return placeholder JSON; in production they can call the control-plane and API HTTP endpoints for live data.
+- **Transport**: stdio (one process per client connection)
+- **Data source**: Tools call the API and control plane HTTP endpoints for live data

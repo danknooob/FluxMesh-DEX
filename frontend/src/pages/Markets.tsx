@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { apiFetch } from '../auth/api';
 
 type Market = { id: string; base_asset: string; quote_asset: string; tick_size: string; fee_rate: string; enabled: boolean };
 
@@ -8,7 +9,7 @@ export function Markets() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/markets')
+    apiFetch('/api/markets')
       .then((r) => r.json())
       .then(setMarkets)
       .catch(() => setMarkets([]))
@@ -25,7 +26,7 @@ export function Markets() {
         {markets.map((m) => (
           <Link
             key={m.id}
-            to={`/markets/${encodeURIComponent(m.id)}`}
+            to={`/trade/markets/${encodeURIComponent(m.id)}`}
             style={{
               display: 'block',
               padding: '1rem',

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../../auth/api';
 
 type ServiceHealth = {
   name: string;
@@ -17,7 +18,7 @@ export function AdminHealth() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch('/control/admin/health')
+    apiFetch('/control/admin/health')
       .then(async (r) => {
         if (!r.ok) {
           throw new Error('Failed to load health');

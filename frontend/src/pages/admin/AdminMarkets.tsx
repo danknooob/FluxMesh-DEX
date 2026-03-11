@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../../auth/api';
 
 type Market = {
   id: string;
@@ -18,7 +19,7 @@ export function AdminMarkets() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch('/control/admin/markets')
+    apiFetch('/control/admin/markets')
       .then(async (r) => {
         if (!r.ok) {
           throw new Error('Failed to load markets config');
