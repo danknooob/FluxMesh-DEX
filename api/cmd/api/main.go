@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/danknooob/fluxmesh-dex/api/internal/auth"
 	"github.com/danknooob/fluxmesh-dex/api/internal/config"
 	"github.com/danknooob/fluxmesh-dex/api/internal/dbseed"
 	"github.com/danknooob/fluxmesh-dex/api/internal/handler"
@@ -40,27 +41,41 @@ func main() {
 	marketSvc := service.NewMarketService(marketRepo)
 	orderSvc := service.NewOrderService(orderRepo, marketSvc, producer)
 
+	authCtrl := handler.NewAuthController(cfg)
 	orderCtrl := handler.NewOrderController(orderSvc)
 	marketCtrl := handler.NewMarketController(marketSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.StripSlashes)
 
-	// Trader-facing APIs
-	r.Method(http.MethodGet, "/orders", http.HandlerFunc(orderCtrl.List))
-	r.Method(http.MethodPost, "/orders", http.HandlerFunc(orderCtrl.Create))
-	r.Method(http.MethodDelete, "/orders/{id}", http.HandlerFunc(orderCtrl.Delete))
-	// Support both /markets and /markets/ explicitly to avoid confusion.
-	r.Method(http.MethodGet, "/markets", http.HandlerFunc(marketCtrl.List))
-	r.Method(http.MethodGet, "/markets/", http.HandlerFunc(marketCtrl.List))
-	r.Method(http.MethodGet, "/markets/{id}", http.HandlerFunc(marketCtrl.Get))
+	// Public routes
+	r.Method(http.MethodPost, "/auth/login", http.HandlerFunc(authCtrl.Login))
 
-	// GET /balances placeholder (indexer/read-model will populate)
-	r.Method(http.MethodGet, "/balances", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("[]"))
-	}))
-// x
+	// All API routes below this point require a valid JWT.
+	r.Group(func(gr chi.Router) {
+		gr.Use(func(next http.Handler) http.Handler {
+			return auth.AuthMiddleware(cfg, false, next)
+		})
+
+		// Trader-facing APIs
+		gr.Method(http.MethodGet, "/orders", http.HandlerFunc(orderCtrl.List))
+		gr.Method(http.MethodPost, "/orders", http.HandlerFunc(orderCtrl.Create))
+		gr.Method(http.MethodDelete, "/orders/{id}", http.HandlerFunc(orderCtrl.Delete))
+
+		// Markets
+		// Support both /markets and /markets/ explicitly to avoid confusion.
+		gr.Method(http.MethodGet, "/markets", http.HandlerFunc(marketCtrl.List))
+		gr.Method(http.MethodGet, "/markets/", http.HandlerFunc(marketCtrl.List))
+		gr.Method(http.MethodGet, "/markets/{id}", http.HandlerFunc(marketCtrl.Get))
+
+		// GET /balances placeholder (indexer/read-model will populate)
+		gr.Method(http.MethodGet, "/balances", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
+		}))
+	})
+
+	// x
 	log.Printf("API listening on :%s", cfg.HTTPPort)
 	if err := http.ListenAndServe(":"+cfg.HTTPPort, r); err != nil {
 		log.Fatalf("serve: %v", err)

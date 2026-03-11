@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/danknooob/fluxmesh-dex/api/internal/auth"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -26,10 +27,10 @@ func (c *OrderController) List(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	// TODO: derive userID from auth/JWT
-	userID := r.URL.Query().Get("user_id")
+	userID := auth.UserIDFrom(r.Context())
 	if userID == "" {
-		userID = "default-user"
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
 	marketID := r.URL.Query().Get("market_id")
 	status := r.URL.Query().Get("status")
@@ -54,10 +55,12 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	// TODO: set req.UserID from JWT or wallet auth
-	if req.UserID == "" {
-		req.UserID = "default-user"
+	userID := auth.UserIDFrom(r.Context())
+	if userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
 	}
+	req.UserID = userID
 
 	order, err := c.orderService.CreateLimitOrder(r.Context(), req)
 	if err != nil {
@@ -89,7 +92,11 @@ func (c *OrderController) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid order id", http.StatusBadRequest)
 		return
 	}
-	userID := "default-user" // TODO: from auth
+	userID := auth.UserIDFrom(r.Context())
+	if userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	if err := c.orderService.CancelOrder(r.Context(), id, userID); err != nil {
 		http.Error(w, "cancel failed", http.StatusInternalServerError)
