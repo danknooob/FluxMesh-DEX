@@ -3,9 +3,10 @@ package orderbook
 import (
 	"sort"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
-// Side represents buy or sell.
 type Side string
 
 const (
@@ -13,46 +14,39 @@ const (
 	SideSell Side = "sell"
 )
 
-// Order models a simplified in-memory order for matching.
 type Order struct {
 	ID        string
 	UserID    string
 	MarketID  string
 	Side      Side
-	Price     float64
-	Size      float64
-	Remaining float64
+	Price     decimal.Decimal
+	Size      decimal.Decimal
+	Remaining decimal.Decimal
 	CreatedAt time.Time
 }
 
-// Fill represents a single matched piece between two orders.
 type Fill struct {
 	TradeID      string
 	MarketID     string
 	MakerOrderID string
 	TakerOrderID string
-	Price        float64
-	Size         float64
+	Price        decimal.Decimal
+	Size         decimal.Decimal
 	MakerSide    Side
 	Ts           time.Time
 }
 
-// OrderBook defines the behavior of a per-market order book.
 type OrderBook interface {
 	MatchIncoming(incoming *Order) (fills []Fill)
 	Add(order *Order)
 }
 
-// priceTimeOrderBook is a simple implementation with in-memory slices.
-// This is sufficient as a skeleton; production systems usually use
-// more advanced data structures per price level.
 type priceTimeOrderBook struct {
 	marketID string
-	bids     []*Order // sorted by price desc, then time asc
-	asks     []*Order // sorted by price asc, then time asc
+	bids     []*Order
+	asks     []*Order
 }
 
-// NewPriceTimeOrderBook creates a new empty book for a market.
 func NewPriceTimeOrderBook(marketID string) OrderBook {
 	return &priceTimeOrderBook{
 		marketID: marketID,
@@ -64,92 +58,77 @@ func NewPriceTimeOrderBook(marketID string) OrderBook {
 func (b *priceTimeOrderBook) MatchIncoming(in *Order) []Fill {
 	var fills []Fill
 	now := time.Now().UTC()
+	zero := decimal.Zero
 
 	switch in.Side {
 	case SideBuy:
-		// Match against best asks (ascending price).
 		sort.Slice(b.asks, func(i, j int) bool {
-			if b.asks[i].Price == b.asks[j].Price {
+			cmp := b.asks[i].Price.Cmp(b.asks[j].Price)
+			if cmp == 0 {
 				return b.asks[i].CreatedAt.Before(b.asks[j].CreatedAt)
 			}
-			return b.asks[i].Price < b.asks[j].Price
+			return cmp < 0
 		})
 		for _, ask := range b.asks {
-			if in.Remaining <= 0 {
+			if in.Remaining.LessThanOrEqual(zero) {
 				break
 			}
-			if in.Price < ask.Price {
+			if in.Price.LessThan(ask.Price) {
 				break
 			}
-			size := min(in.Remaining, ask.Remaining)
-			if size <= 0 {
+			fillSize := decimal.Min(in.Remaining, ask.Remaining)
+			if fillSize.LessThanOrEqual(zero) {
 				continue
 			}
-			in.Remaining -= size
-			ask.Remaining -= size
+			in.Remaining = in.Remaining.Sub(fillSize)
+			ask.Remaining = ask.Remaining.Sub(fillSize)
 			fills = append(fills, Fill{
-				TradeID:      "", // to be filled by caller
 				MarketID:     b.marketID,
 				MakerOrderID: ask.ID,
 				TakerOrderID: in.ID,
 				Price:        ask.Price,
-				Size:         size,
+				Size:         fillSize,
 				MakerSide:    SideSell,
 				Ts:           now,
 			})
 		}
-		// Clean fully filled asks.
-		var remainingAsks []*Order
-		for _, ask := range b.asks {
-			if ask.Remaining > 0 {
-				remainingAsks = append(remainingAsks, ask)
-			}
-		}
-		b.asks = remainingAsks
+		b.asks = pruneFilledOrders(b.asks)
+
 	case SideSell:
-		// Match against best bids (descending price).
 		sort.Slice(b.bids, func(i, j int) bool {
-			if b.bids[i].Price == b.bids[j].Price {
+			cmp := b.bids[i].Price.Cmp(b.bids[j].Price)
+			if cmp == 0 {
 				return b.bids[i].CreatedAt.Before(b.bids[j].CreatedAt)
 			}
-			return b.bids[i].Price > b.bids[j].Price
+			return cmp > 0
 		})
 		for _, bid := range b.bids {
-			if in.Remaining <= 0 {
+			if in.Remaining.LessThanOrEqual(zero) {
 				break
 			}
-			if in.Price > bid.Price {
+			if in.Price.GreaterThan(bid.Price) {
 				break
 			}
-			size := min(in.Remaining, bid.Remaining)
-			if size <= 0 {
+			fillSize := decimal.Min(in.Remaining, bid.Remaining)
+			if fillSize.LessThanOrEqual(zero) {
 				continue
 			}
-			in.Remaining -= size
-			bid.Remaining -= size
+			in.Remaining = in.Remaining.Sub(fillSize)
+			bid.Remaining = bid.Remaining.Sub(fillSize)
 			fills = append(fills, Fill{
-				TradeID:      "",
 				MarketID:     b.marketID,
 				MakerOrderID: bid.ID,
 				TakerOrderID: in.ID,
 				Price:        bid.Price,
-				Size:         size,
+				Size:         fillSize,
 				MakerSide:    SideBuy,
 				Ts:           now,
 			})
 		}
-		// Clean fully filled bids.
-		var remainingBids []*Order
-		for _, bid := range b.bids {
-			if bid.Remaining > 0 {
-				remainingBids = append(remainingBids, bid)
-			}
-		}
-		b.bids = remainingBids
+		b.bids = pruneFilledOrders(b.bids)
 	}
 
-	// If the incoming order still has remaining size, rest it on the book.
-	if in.Remaining > 0 {
+	if in.Remaining.GreaterThan(zero) {
 		b.Add(in)
 	}
 
@@ -165,10 +144,12 @@ func (b *priceTimeOrderBook) Add(order *Order) {
 	}
 }
 
-func min(a, b float64) float64 {
-	if a < b {
-		return a
+func pruneFilledOrders(orders []*Order) []*Order {
+	kept := make([]*Order, 0, len(orders))
+	for _, o := range orders {
+		if o.Remaining.GreaterThan(decimal.Zero) {
+			kept = append(kept, o)
+		}
 	}
-	return b
+	return kept
 }
-

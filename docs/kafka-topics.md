@@ -29,7 +29,7 @@
 |---------|----------|--------|
 | Matching engine | `matching-engine` | `orders.created` |
 | Settlement | `settlement` | `orders.matched` |
-| Indexer | `indexer` | `trades.settled`, `balances.updated`, chain events |
+| Indexer | `indexer` | `orders.matched`, `orders.rejected`, `trades.settled`, `balances.updated` |
 | Notification | `notification` | Domain topics + `notifications.user` |
 | Event log | `eventlog` | All 13 topics |
 | Data-plane services | Per-service | `control.config`, `control.commands` |
@@ -37,6 +37,7 @@
 ## Offset Management
 
 - **Matching engine & Settlement**: Explicit `FetchMessage` + `CommitMessages` — only commits after successful processing.
+- **Indexer**: `FetchMessage` + retry with exponential backoff (3 retries, 300ms base) + `CommitMessages` after success. Drops and logs after exhausting retries.
 - **Event log**: Only commits after successful MongoDB write, ensuring no events are lost.
 - **Notification**: `ReadMessage` with auto-commit (at-most-once is acceptable for notifications).
 

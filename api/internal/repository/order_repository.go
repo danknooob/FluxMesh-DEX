@@ -8,12 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// OrderRepository handles order persistence.
+// OrderRepository handles order persistence via stored functions.
 type OrderRepository struct {
 	db *gorm.DB
 }
 
-// NewOrderRepository creates an OrderRepository.
 func NewOrderRepository(db *gorm.DB) *OrderRepository {
 	return &OrderRepository{db: db}
 }
@@ -25,65 +24,93 @@ type OrderFilter struct {
 	Status   string
 }
 
-// FindByIdempotencyKey returns an existing order with the given key, or nil.
 func (r *OrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
 	if key == "" {
 		return nil, nil
 	}
 	var o models.Order
-	err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&o).Error
-	if err == gorm.ErrRecordNotFound {
+	result := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_find_order_by_idempotency_key($1)", key).
+		Scan(&o)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
 	return &o, nil
 }
 
-// Create persists an order.
 func (r *OrderRepository) Create(ctx context.Context, o *models.Order) error {
-	return r.db.WithContext(ctx).Create(o).Error
+	return r.db.WithContext(ctx).
+		Raw(
+			"SELECT * FROM fn_create_order($1,$2,$3,$4,$5,$6,$7,$8)",
+			o.IdempotencyKey, o.UserID, o.MarketID,
+			string(o.Side), string(o.Type),
+			o.Price, o.Size, o.Remaining,
+		).Scan(o).Error
 }
 
-// List returns orders matching the provided filter.
-// Empty fields in the filter are ignored.
 func (r *OrderRepository) List(ctx context.Context, f OrderFilter) ([]models.Order, error) {
-	tx := r.db.WithContext(ctx).Model(&models.Order{})
-	if f.UserID != "" {
-		tx = tx.Where("user_id = ?", f.UserID)
-	}
-	if f.MarketID != "" {
-		tx = tx.Where("market_id = ?", f.MarketID)
-	}
-	if f.Status != "" {
-		tx = tx.Where("status = ?", f.Status)
-	}
+	userID := nilIfEmpty(f.UserID)
+	marketID := nilIfEmpty(f.MarketID)
+	status := nilIfEmpty(f.Status)
+
 	var out []models.Order
-	if err := tx.Order("created_at DESC").Find(&out).Error; err != nil {
-		return nil, err
-	}
-	return out, nil
+	err := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_list_orders($1,$2,$3)", userID, marketID, status).
+		Scan(&out).Error
+	return out, err
 }
 
-// GetByID returns an order by ID.
+// PriceLevel is one aggregated row in the order book depth.
+type PriceLevel struct {
+	Price     string `json:"price"`
+	TotalSize string `json:"total_size"`
+	Count     int    `json:"count"`
+}
+
+func (r *OrderRepository) Depth(ctx context.Context, marketID string, side string, limit int) ([]PriceLevel, error) {
+	var levels []PriceLevel
+	err := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_order_depth($1,$2,$3)", marketID, side, limit).
+		Scan(&levels).Error
+	return levels, err
+}
+
 func (r *OrderRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Order, error) {
 	var o models.Order
-	err := r.db.WithContext(ctx).Where("id = ?", id).First(&o).Error
-	if err != nil {
-		return nil, err
+	result := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_get_order_by_id($1)", id.String()).
+		Scan(&o)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	return &o, nil
 }
 
-// Update updates an order.
 func (r *OrderRepository) Update(ctx context.Context, o *models.Order) error {
-	return r.db.WithContext(ctx).Save(o).Error
+	return r.db.WithContext(ctx).
+		Exec(
+			"SELECT fn_update_order($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+			o.ID.String(), o.UserID, o.MarketID,
+			string(o.Side), string(o.Type),
+			o.Price, o.Size, o.Remaining,
+			string(o.Status),
+		).Error
 }
 
-// Delete soft-deletes an order (cancel).
 func (r *OrderRepository) Delete(ctx context.Context, id uuid.UUID, userID string) error {
-	return r.db.WithContext(ctx).Model(&models.Order{}).
-		Where("id = ? AND user_id = ?", id, userID).
-		Update("status", models.OrderStatusCancelled).Error
+	return r.db.WithContext(ctx).
+		Exec("SELECT fn_cancel_order($1,$2)", id.String(), userID).Error
+}
+
+func nilIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }

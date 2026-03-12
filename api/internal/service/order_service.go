@@ -121,3 +121,22 @@ func (s *OrderService) ListOrders(ctx context.Context, userID, marketID, status 
 func (s *OrderService) GetOrder(ctx context.Context, id uuid.UUID) (*models.Order, error) {
 	return s.repo.GetByID(ctx, id)
 }
+
+// DepthResponse is the aggregated order book for a market.
+type DepthResponse struct {
+	Bids []repository.PriceLevel `json:"bids"`
+	Asks []repository.PriceLevel `json:"asks"`
+}
+
+// GetDepth returns aggregated bids and asks for a market.
+func (s *OrderService) GetDepth(ctx context.Context, marketID string, limit int) (*DepthResponse, error) {
+	bids, err := s.repo.Depth(ctx, marketID, "buy", limit)
+	if err != nil {
+		return nil, err
+	}
+	asks, err := s.repo.Depth(ctx, marketID, "sell", limit)
+	if err != nil {
+		return nil, err
+	}
+	return &DepthResponse{Bids: bids, Asks: asks}, nil
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/danknooob/fluxmesh-dex/api/internal/dbseed"
 	"github.com/danknooob/fluxmesh-dex/api/internal/handler"
 	"github.com/danknooob/fluxmesh-dex/api/internal/kafka"
+	"github.com/danknooob/fluxmesh-dex/api/internal/migrations"
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
 	"github.com/danknooob/fluxmesh-dex/api/internal/repository"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
@@ -28,6 +29,9 @@ func main() {
 	if err := db.AutoMigrate(&models.User{}, &models.Order{}, &models.Market{}, &models.Balance{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	if err := migrations.RunStoredProcedures(db); err != nil {
+		log.Fatalf("stored procedures: %v", err)
+	}
 
 	if err := dbseed.SeedInitialMarkets(db); err != nil {
 		log.Printf("seed markets: %v", err)
@@ -40,6 +44,7 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	marketRepo := repository.NewMarketRepository(db)
+	balanceRepo := repository.NewBalanceRepository(db)
 
 	userSvc := service.NewUserService(userRepo, producer)
 	marketSvc := service.NewMarketService(marketRepo)
@@ -49,6 +54,7 @@ func main() {
 	profileCtrl := handler.NewProfileController(userSvc)
 	orderCtrl := handler.NewOrderController(orderSvc)
 	marketCtrl := handler.NewMarketController(marketSvc)
+	balanceCtrl := handler.NewBalanceController(balanceRepo)
 
 	r := chi.NewRouter()
 	r.Use(middleware.StripSlashes)
@@ -69,11 +75,9 @@ func main() {
 
 		gr.Get("/markets", marketCtrl.List)
 		gr.Get("/markets/{id}", marketCtrl.Get)
+		gr.Get("/markets/{id}/depth", orderCtrl.Depth)
 
-		gr.Get("/balances", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("[]"))
-		})
+		gr.Get("/balances", balanceCtrl.List)
 	})
 
 	log.Printf("API listening on :%s", cfg.HTTPPort)

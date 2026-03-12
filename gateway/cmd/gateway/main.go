@@ -50,6 +50,7 @@ func main() {
 
 		gr.Get("/markets", apiProxy.ServeHTTP)
 		gr.Get("/markets/{id}", apiProxy.ServeHTTP)
+		gr.Get("/markets/{id}/depth", apiProxy.ServeHTTP)
 		gr.Get("/orders", apiProxy.ServeHTTP)
 		gr.Post("/orders", apiProxy.ServeHTTP)
 		gr.Delete("/orders/{id}", apiProxy.ServeHTTP)

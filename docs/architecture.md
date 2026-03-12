@@ -24,12 +24,12 @@
                │  Postgres     │   └────────────────────┘
                └───────┬───────┘
                        │  Kafka
-        ┌──────────────┼──────────────┬──────────────┐
-        ▼              ▼              ▼              ▼
-  ┌───────────┐ ┌───────────┐ ┌────────────┐ ┌────────────┐
-  │ Matching  │ │Settlement │ │Notification│ │ Event Log  │
-  │ Engine    │ │ Service   │ │ WebSocket  │ │  → MongoDB │
-  └───────────┘ └───────────┘ └────────────┘ └────────────┘
+        ┌──────────────┼──────────────┬──────────────┬──────────────┐
+        ▼              ▼              ▼              ▼              ▼
+  ┌───────────┐ ┌───────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
+  │ Matching  │ │Settlement │ │  Indexer   │ │Notification│ │ Event Log  │
+  │ Engine    │ │ Service   │ │ → Postgres │ │ WebSocket  │ │  → MongoDB │
+  └───────────┘ └───────────┘ └────────────┘ └────────────┘ └────────────┘
 ```
 
 ## Layers
@@ -50,7 +50,7 @@ Services that move orders and trades:
 1. **API Service** — HTTP gateway. Authenticates users (bcrypt + JWT), manages user profiles, persists orders in Postgres, publishes events (`orders.created`, `users.updated`, `users.deleted`) to Kafka. Trusts gateway-injected headers for user identity.
 2. **Matching Engine** — Consumes `orders.created`, maintains in-memory order books (price-time priority), emits `orders.matched` / `orders.rejected`.
 3. **Settlement** — Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades`, emits `trades.settled` and `balances.updated`.
-4. **Indexer** — Listens to chain events and `trades.settled`; updates Postgres read models (positions, balances, trade history).
+4. **Indexer** — Consumes `orders.matched`, `orders.rejected`, `trades.settled`, `balances.updated`; projects into Postgres read models (order statuses, trade records, user balances). Built with SOLID principles: `EventHandler` interface per topic, segregated repository interfaces (`OrderWriter`, `TradeWriter`, `BalanceWriter`), and constructor-based dependency injection.
 5. **Notification** — Consumes domain topics + `notifications.user`; holds WebSocket connections per user and pushes real-time updates.
 6. **Event Log** — Consumes all 13 Kafka topics and persists every event to MongoDB with a human-readable title. Serves as immutable audit trail.
 

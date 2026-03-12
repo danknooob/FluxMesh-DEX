@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/auth"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
@@ -81,6 +82,29 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}
 	_ = json.NewEncoder(w).Encode(order)
+}
+
+// Depth returns aggregated bids/asks for a market (GET /markets/{id}/depth).
+func (c *OrderController) Depth(w http.ResponseWriter, r *http.Request) {
+	marketID := chi.URLParam(r, "id")
+	if marketID == "" {
+		http.Error(w, "missing market id", http.StatusBadRequest)
+		return
+	}
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	depth, err := c.orderService.GetDepth(r.Context(), marketID, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(depth)
 }
 
 // Delete cancels an order (DELETE /orders/:id).

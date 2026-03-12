@@ -52,14 +52,15 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 
 | Path | Description |
 |------|-------------|
-| `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy |
+| `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy ([SERVICE.md](gateway/SERVICE.md)) |
 | `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) |
-| `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) |
-| `matching-engine/` | Order-book matching; consumes `orders.created`, emits `orders.matched` / `orders.rejected` |
-| `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` |
-| `notification/` | WebSocket service; consumes domain + notification topics |
-| `eventlog/` | Kafka → MongoDB event logger; subscribes to all topics and persists every event |
-| `mcp/` | Control plane HTTP API + MCP (Model Context Protocol) server with DEX tools for AI |
+| `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) ([SERVICE.md](api/SERVICE.md)) |
+| `matching-engine/` | Order-book matching; consumes `orders.created`, emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
+| `indexer/` | Kafka → Postgres projector; updates order statuses, creates trade records, upserts balances ([SERVICE.md](indexer/SERVICE.md)) |
+| `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` ([SERVICE.md](settlement/SERVICE.md)) |
+| `notification/` | WebSocket service; consumes domain + notification topics ([SERVICE.md](notification/SERVICE.md)) |
+| `eventlog/` | Kafka → MongoDB event logger; subscribes to all topics and persists every event ([SERVICE.md](eventlog/SERVICE.md)) |
+| `mcp/` | Control plane HTTP API + MCP (Model Context Protocol) server with DEX tools for AI ([SERVICE.md](mcp/SERVICE.md)) |
 | `frontend/` | React — public Home, Trader UI, Admin UI |
 
 ## API Gateway
@@ -137,24 +138,30 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
    ```
    Listens on `:8080` (internal, behind gateway).
 
-4. **Event Log**
+4. **Indexer**
+   ```bash
+   cd indexer && go mod tidy && go run ./cmd/indexer
+   ```
+   Projects Kafka events into Postgres (order statuses, trades, balances). Health on `:8082`.
+
+5. **Event Log**
    ```bash
    cd eventlog && go mod tidy && go run ./cmd/eventlog
    ```
    Consumes all Kafka topics and writes to MongoDB.
 
-5. **Frontend**
+6. **Frontend**
    ```bash
    cd frontend && npm install && npm run dev
    ```
    Vite dev server on `:3000`, proxies `/api` and `/control` to the gateway.
 
-6. **Control plane**
+7. **Control plane**
    ```bash
    cd mcp && go mod tidy && go run ./cmd/mcp
    ```
 
-7. **MCP server (Model Context Protocol — for AI assistants)**
+8. **MCP server (Model Context Protocol — for AI assistants)**
    ```bash
    cd mcp && go run ./cmd/fluxmesh-mcp
    ```

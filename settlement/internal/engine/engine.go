@@ -4,36 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"strconv"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/shopspring/decimal"
 )
 
-// MatchedTrade represents a single fill from the matching engine.
 type MatchedTrade struct {
-	TradeID      string  `json:"trade_id"`
-	MarketID     string  `json:"market_id"`
-	MakerOrderID string  `json:"maker_order_id"`
-	TakerOrderID string  `json:"taker_order_id"`
-	Price        string  `json:"price"`
-	Size         string  `json:"size"`
-	MakerSide    string  `json:"maker_side"` // "buy" or "sell"
-	Ts           string  `json:"ts"`
+	TradeID      string `json:"trade_id"`
+	MarketID     string `json:"market_id"`
+	MakerOrderID string `json:"maker_order_id"`
+	TakerOrderID string `json:"taker_order_id"`
+	Price        string `json:"price"`
+	Size         string `json:"size"`
+	MakerSide    string `json:"maker_side"`
+	Ts           string `json:"ts"`
 }
 
-// SettlementBatch is a group of trades to send to the EVM in one call.
 type SettlementBatch struct {
 	Trades []MatchedTrade
 }
 
-// EventProducer publishes trades.settled and balances.updated events.
 type EventProducer interface {
 	PublishTradesSettled(ctx context.Context, payload interface{}) error
 	PublishBalancesUpdated(ctx context.Context, payload interface{}) error
 }
 
-// KafkaProducer is a basic EventProducer implementation using kafka-go.
 type KafkaProducer struct {
 	tradesWriter   *kafka.Writer
 	balancesWriter *kafka.Writer
@@ -71,8 +67,6 @@ func (p *KafkaProducer) PublishBalancesUpdated(ctx context.Context, payload inte
 	return p.balancesWriter.WriteMessages(ctx, kafka.Message{Value: body})
 }
 
-// Engine is the settlement engine skeleton.
-// In a real system this would hold an Ethereum client and contract bindings.
 type Engine struct {
 	prod    EventProducer
 	nowFunc func() time.Time
@@ -88,16 +82,12 @@ func NewEngine(prod EventProducer) *Engine {
 // ProcessMatched consumes a single matched trade event (orders.matched)
 // and emits trades.settled and balances.updated after (placeholder) settlement.
 func (e *Engine) ProcessMatched(ctx context.Context, t MatchedTrade) error {
-	// Placeholder: here you would batch multiple trades and call ExchangeCore.settleTrades
-	// via an Ethereum client / contract binding. For now we just emit a trades.settled event
-	// as if settlement succeeded immediately.
-
-	priceDec, err := strconv.ParseFloat(t.Price, 64)
+	priceDec, err := decimal.NewFromString(t.Price)
 	if err != nil {
 		log.Printf("settlement: invalid price %q for trade %s", t.Price, t.TradeID)
 		return nil
 	}
-	sizeDec, err := strconv.ParseFloat(t.Size, 64)
+	sizeDec, err := decimal.NewFromString(t.Size)
 	if err != nil {
 		log.Printf("settlement: invalid size %q for trade %s", t.Size, t.TradeID)
 		return nil
@@ -113,8 +103,8 @@ func (e *Engine) ProcessMatched(ctx context.Context, t MatchedTrade) error {
 		"market_id":      t.MarketID,
 		"maker_order_id": t.MakerOrderID,
 		"taker_order_id": t.TakerOrderID,
-		"price":          priceDec,
-		"size":           sizeDec,
+		"price":          priceDec.String(),
+		"size":           sizeDec.String(),
 		"maker_side":     t.MakerSide,
 		"ts":             ts,
 	}
@@ -123,8 +113,7 @@ func (e *Engine) ProcessMatched(ctx context.Context, t MatchedTrade) error {
 		return err
 	}
 
-	// Placeholder balances.updated events: in a real DEX you'd compute net deltas
-	// for maker and taker across base/quote assets.
+	// Placeholder: in a real DEX you'd compute per-user per-asset deltas here.
 	balancesPayload := map[string]interface{}{
 		"note":      "balances.updated would contain per-user per-asset deltas",
 		"trade_id":  t.TradeID,
@@ -138,4 +127,3 @@ func (e *Engine) ProcessMatched(ctx context.Context, t MatchedTrade) error {
 
 	return nil
 }
-
