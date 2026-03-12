@@ -29,10 +29,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// For now we only consume notifications.user; later we can add
-	// orders.matched, balances.updated, etc., and shape payloads per user.
-	cons := notifyKafka.NewNotificationConsumer(brokers, "notifications.user", h)
-	go cons.Run(ctx)
+	userCons := notifyKafka.NewNotificationConsumer(brokers, "notifications.user", h)
+	go userCons.Run(ctx)
+
+	matchedCons := notifyKafka.NewMatchedConsumer(brokers, h)
+	go matchedCons.Run(ctx)
+
+	cancelCons := notifyKafka.NewTypedConsumer(brokers, "orders.cancelled", "order_cancelled", h)
+	go cancelCons.Run(ctx)
+
+	balanceCons := notifyKafka.NewTypedConsumer(brokers, "balances.updated", "balance_updated", h)
+	go balanceCons.Run(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", server.WSHandler(h))

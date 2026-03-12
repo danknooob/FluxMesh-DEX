@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { apiFetch } from '../auth/api';
+import { useNotifications } from '../components/NotificationProvider';
 
 type Market = {
   id: string;
@@ -36,6 +37,8 @@ export function OrderBook() {
   const [depth, setDepth] = useState<Depth | null>(null);
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const [cancelling, setCancelling] = useState<string | null>(null);
+
+  const { subscribe } = useNotifications();
 
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [price, setPrice] = useState('');
@@ -79,6 +82,15 @@ export function OrderBook() {
     const id = setInterval(() => { fetchDepth(); fetchMyOrders(); }, POLL_INTERVAL);
     return () => clearInterval(id);
   }, [fetchDepth, fetchMyOrders]);
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'order_filled' || msg.type === 'order_cancelled') {
+        fetchDepth();
+        fetchMyOrders();
+      }
+    });
+  }, [subscribe, fetchDepth, fetchMyOrders]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();

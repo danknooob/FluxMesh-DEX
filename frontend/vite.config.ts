@@ -16,6 +16,10 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/control/, ''),
       },
+      '/ws': {
+        target: 'ws://localhost:8090',
+        ws: true,
+      },
     },
   },
 });

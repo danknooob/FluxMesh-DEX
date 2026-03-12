@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '../auth/api';
+import { useNotifications } from '../components/NotificationProvider';
 
 type Balance = {
   user_id: string;
@@ -13,8 +14,9 @@ export function Balances() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { subscribe } = useNotifications();
 
-  useEffect(() => {
+  const fetchBalances = useCallback(() => {
     apiFetch('/api/balances')
       .then(async (r) => {
         if (!r.ok) throw new Error(await r.text());
@@ -24,6 +26,16 @@ export function Balances() {
       .catch((err) => setError(err?.message ?? 'Failed to load balances'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { fetchBalances(); }, [fetchBalances]);
+
+  useEffect(() => {
+    return subscribe((msg) => {
+      if (msg.type === 'balance_updated' || msg.type === 'order_filled') {
+        fetchBalances();
+      }
+    });
+  }, [subscribe, fetchBalances]);
 
   const total = balances.reduce((acc, b) => acc + parseFloat(b.available || '0') + parseFloat(b.locked || '0'), 0);
 

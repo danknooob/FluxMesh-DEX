@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { NotificationProvider } from './components/NotificationProvider';
 import { PublicLayout } from './layouts/PublicLayout';
 import { TraderLayout } from './layouts/TraderLayout';
 import { AdminLayout } from './layouts/AdminLayout';
@@ -17,6 +18,7 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <NotificationProvider>
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<Login />} />
@@ -54,6 +56,7 @@ function App() {
             <Route path="health" element={<AdminHealth />} />
           </Route>
         </Routes>
+        </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
   );

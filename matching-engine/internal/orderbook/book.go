@@ -29,7 +29,9 @@ type Fill struct {
 	TradeID        string
 	MarketID       string
 	MakerOrderID   string
+	MakerUserID    string
 	TakerOrderID   string
+	TakerUserID    string
 	Price          decimal.Decimal
 	Size           decimal.Decimal
 	MakerSide      Side
@@ -88,7 +90,9 @@ func (b *priceTimeOrderBook) MatchIncoming(in *Order) []Fill {
 			fills = append(fills, Fill{
 				MarketID:       b.marketID,
 				MakerOrderID:   ask.ID,
+				MakerUserID:    ask.UserID,
 				TakerOrderID:   in.ID,
+				TakerUserID:    in.UserID,
 				Price:          ask.Price,
 				Size:           fillSize,
 				MakerSide:      SideSell,
@@ -123,7 +127,9 @@ func (b *priceTimeOrderBook) MatchIncoming(in *Order) []Fill {
 			fills = append(fills, Fill{
 				MarketID:       b.marketID,
 				MakerOrderID:   bid.ID,
+				MakerUserID:    bid.UserID,
 				TakerOrderID:   in.ID,
+				TakerUserID:    in.UserID,
 				Price:          bid.Price,
 				Size:           fillSize,
 				MakerSide:      SideBuy,

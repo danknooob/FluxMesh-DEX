@@ -1,9 +1,11 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { useNotifications } from '../components/NotificationProvider';
 
 export function TraderLayout() {
   const { auth, logout } = useAuth();
   const navigate = useNavigate();
+  const { connected } = useNotifications();
 
   const handleLogout = () => {
     logout();
@@ -26,6 +28,13 @@ export function TraderLayout() {
         </nav>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span title={connected ? 'Live: real-time updates' : 'Reconnecting…'}
+            style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: connected ? '#22c55e' : '#f97373',
+              boxShadow: connected ? '0 0 6px #22c55e' : 'none',
+              flexShrink: 0,
+            }} />
           {auth && (
             <span style={{ color: '#64748b', fontSize: '0.85rem' }}>
               {auth.email} <span style={{
