@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/danknooob/fluxmesh-dex/notification/internal/hub"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
 
@@ -12,18 +13,39 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In dev, accept all origins. In prod, restrict this.
 		return true
 	},
 }
 
-// WSHandler upgrades HTTP connections to WebSockets and wires them into the hub.
-// For now, user_id is taken from a query param; later it should come from JWT.
-func WSHandler(h *hub.Hub) http.HandlerFunc {
+type claims struct {
+	UserID string `json:"sub"`
+	Role   string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+// WSHandler upgrades HTTP connections to WebSockets after validating the
+// JWT token supplied as a ?token= query parameter. The browser WebSocket
+// API cannot send custom headers, so query-param auth is the standard
+// approach for WS connections.
+func WSHandler(h *hub.Hub, jwtSecret []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID := r.URL.Query().Get("user_id")
-		if userID == "" {
-			http.Error(w, "missing user_id", http.StatusBadRequest)
+		raw := r.URL.Query().Get("token")
+		if raw == "" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+
+		token, err := jwt.ParseWithClaims(raw, &claims{}, func(t *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		})
+		if err != nil {
+			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		c, ok := token.Claims.(*claims)
+		if !ok || !token.Valid || c.UserID == "" {
+			http.Error(w, "invalid token claims", http.StatusUnauthorized)
 			return
 		}
 
@@ -34,12 +56,11 @@ func WSHandler(h *hub.Hub) http.HandlerFunc {
 		}
 
 		client := &hub.Client{
-			UserID: userID,
+			UserID: c.UserID,
 			Send:   make(chan []byte, 256),
 		}
 		h.Register(client)
 
-		// Writer goroutine.
 		go func() {
 			defer func() {
 				h.Unregister(client)
@@ -53,7 +74,6 @@ func WSHandler(h *hub.Hub) http.HandlerFunc {
 			}
 		}()
 
-		// Reader loop (no messages expected yet; just detect close).
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				break
@@ -61,4 +81,3 @@ func WSHandler(h *hub.Hub) http.HandlerFunc {
 		}
 	}
 }
-

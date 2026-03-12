@@ -4,13 +4,11 @@ const STORAGE_KEY = 'fluxmesh_auth';
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
-function getUserIdFromToken(): string | null {
+function getToken(): string | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const { token } = JSON.parse(raw) as { token: string };
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.sub ?? null;
+    return (JSON.parse(raw) as { token: string }).token ?? null;
   } catch {
     return null;
   }
@@ -31,13 +29,13 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false);
 
   const connect = useCallback(() => {
-    const uid = getUserIdFromToken();
-    if (!uid) return;
+    const token = getToken();
+    if (!token) return;
 
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws?user_id=${uid}`);
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws?token=${encodeURIComponent(token)}`);
 
     ws.onopen = () => {
       attemptRef.current = 0;
@@ -69,7 +67,7 @@ export function useWebSocket() {
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** attemptRef.current, RECONNECT_MAX_MS);
     attemptRef.current += 1;
     reconnectTimer.current = setTimeout(() => {
-      if (getUserIdFromToken()) connect();
+      if (getToken()) connect();
     }, delay);
   }, [connect]);
 

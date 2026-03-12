@@ -41,8 +41,10 @@ func main() {
 	balanceCons := notifyKafka.NewTypedConsumer(brokers, "balances.updated", "balance_updated", h)
 	go balanceCons.Run(ctx)
 
+	jwtSecret := getEnv("JWT_SECRET", "change-me-in-production")
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", server.WSHandler(h))
+	mux.HandleFunc("/ws", server.WSHandler(h, []byte(jwtSecret)))
 
 	addr := ":8090"
 	if env := os.Getenv("NOTIFICATION_PORT"); env != "" {
@@ -53,5 +55,12 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("notification: server error: %v", err)
 	}
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
