@@ -44,15 +44,9 @@ func NewUserService(repo repository.UserRepository, producer *kafka.Producer) Us
 	return &userService{repo: repo, producer: producer}
 }
 
+// Register atomically checks email uniqueness and inserts the user
+// inside a single stored function call, eliminating the TOCTOU window.
 func (s *userService) Register(email, password string, role models.UserRole) (*models.User, error) {
-	existing, err := s.repo.FindByEmail(email)
-	if err == nil && existing != nil {
-		return nil, ErrEmailTaken
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -63,7 +57,10 @@ func (s *userService) Register(email, password string, role models.UserRole) (*m
 		PasswordHash: string(hash),
 		Role:         role,
 	}
-	if err := s.repo.Create(user); err != nil {
+	if err := s.repo.RegisterAtomic(user); err != nil {
+		if isPgException(err, "EMAIL_TAKEN") {
+			return nil, ErrEmailTaken
+		}
 		return nil, err
 	}
 	return user, nil
@@ -96,8 +93,10 @@ func (s *userService) GetProfile(ctx context.Context, userID uuid.UUID) (*models
 	return user, nil
 }
 
+// UpdateProfile atomically validates email uniqueness (row-locked)
+// and applies changes via fn_update_profile_atomic.
 func (s *userService) UpdateProfile(ctx context.Context, userID uuid.UUID, req UpdateProfileRequest) (*models.User, error) {
-	user, err := s.repo.FindByID(userID)
+	oldUser, err := s.repo.FindByID(userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrUserNotFound
@@ -105,35 +104,44 @@ func (s *userService) UpdateProfile(ctx context.Context, userID uuid.UUID, req U
 		return nil, err
 	}
 
-	changes := map[string]interface{}{}
-
-	if req.Name != nil {
-		user.Name = strings.TrimSpace(*req.Name)
-		changes["name"] = user.Name
-	}
+	var email, name, avatarURL *string
 	if req.Email != nil {
-		newEmail := strings.TrimSpace(strings.ToLower(*req.Email))
-		if newEmail != user.Email {
-			existing, findErr := s.repo.FindByEmail(newEmail)
-			if findErr == nil && existing != nil && existing.ID != user.ID {
-				return nil, ErrEmailTaken
-			}
-			changes["old_email"] = user.Email
-			changes["new_email"] = newEmail
-			user.Email = newEmail
-		}
+		e := strings.TrimSpace(strings.ToLower(*req.Email))
+		email = &e
+	}
+	if req.Name != nil {
+		n := strings.TrimSpace(*req.Name)
+		name = &n
 	}
 	if req.AvatarURL != nil {
-		user.AvatarURL = *req.AvatarURL
-		changes["avatar_url"] = user.AvatarURL
+		avatarURL = req.AvatarURL
 	}
 
-	if err := s.repo.Update(user); err != nil {
+	updated, err := s.repo.UpdateProfileAtomic(ctx, userID, email, name, avatarURL)
+	if err != nil {
+		if isPgException(err, "EMAIL_TAKEN") {
+			return nil, ErrEmailTaken
+		}
+		if isPgException(err, "USER_NOT_FOUND") {
+			return nil, ErrUserNotFound
+		}
 		return nil, err
 	}
 
+	changes := map[string]interface{}{}
+	if email != nil && *email != oldUser.Email {
+		changes["old_email"] = oldUser.Email
+		changes["new_email"] = *email
+	}
+	if name != nil && *name != oldUser.Name {
+		changes["name"] = *name
+	}
+	if avatarURL != nil && *avatarURL != oldUser.AvatarURL {
+		changes["avatar_url"] = *avatarURL
+	}
+
 	if len(changes) > 0 {
-		changes["user_id"] = user.ID.String()
+		changes["user_id"] = userID.String()
 		changes["action"] = "profile_updated"
 		changes["timestamp"] = time.Now().UTC().Format(time.RFC3339)
 		if err := s.producer.PublishUserUpdated(ctx, changes); err != nil {
@@ -141,7 +149,7 @@ func (s *userService) UpdateProfile(ctx context.Context, userID uuid.UUID, req U
 		}
 	}
 
-	return user, nil
+	return updated, nil
 }
 
 func (s *userService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
@@ -168,4 +176,10 @@ func (s *userService) DeleteAccount(ctx context.Context, userID uuid.UUID) error
 	}
 
 	return nil
+}
+
+// isPgException checks if the error message from a PL/pgSQL RAISE
+// contains the given sentinel string.
+func isPgException(err error, sentinel string) bool {
+	return err != nil && strings.Contains(err.Error(), sentinel)
 }

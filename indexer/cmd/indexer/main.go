@@ -46,7 +46,7 @@ func main() {
 
 	// --- Handlers (depend on interfaces, not GORM) ---
 	registry := handler.Registry{
-		topicOrdersMatched:  handler.NewOrderMatchedHandler(orderWriter, tradeWriter),
+		topicOrdersMatched:  handler.NewOrderMatchedHandler(orderWriter),
 		topicOrdersRejected: handler.NewOrderRejectedHandler(orderWriter),
 		topicTradesSettled:   handler.NewTradeSettledHandler(tradeWriter),
 		topicBalancesUpdated: handler.NewBalanceUpdatedHandler(balanceWriter),

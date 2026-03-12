@@ -303,6 +303,190 @@ BEGIN
 END;
 $$;
 
+-- ===================  COMPOSITE / ATOMIC  ====================
+
+-- Atomically updates both order statuses and creates the trade record.
+-- PL/pgSQL functions execute within a single transaction; if any
+-- statement fails the entire function rolls back.
+CREATE OR REPLACE FUNCTION fn_process_order_matched(
+    p_maker_order_id TEXT,
+    p_taker_order_id TEXT,
+    p_maker_remaining TEXT,
+    p_taker_remaining TEXT,
+    p_trade_id       TEXT,
+    p_market_id      TEXT,
+    p_price          TEXT,
+    p_size           TEXT,
+    p_maker_side     TEXT
+) RETURNS VOID
+LANGUAGE plpgsql AS $$
+BEGIN
+    -- 1. Update maker order
+    UPDATE orders
+    SET status    = CASE WHEN p_maker_remaining::NUMERIC = 0 THEN 'matched' ELSE 'partial' END,
+        remaining = p_maker_remaining::NUMERIC,
+        updated_at = NOW()
+    WHERE id = p_maker_order_id::UUID;
+
+    -- 2. Update taker order
+    UPDATE orders
+    SET status    = CASE WHEN p_taker_remaining::NUMERIC = 0 THEN 'matched' ELSE 'partial' END,
+        remaining = p_taker_remaining::NUMERIC,
+        updated_at = NOW()
+    WHERE id = p_taker_order_id::UUID;
+
+    -- 3. Insert trade (idempotent via ON CONFLICT)
+    INSERT INTO trades (
+        id, market_id, maker_order_id, taker_order_id,
+        price, size, maker_side, created_at, updated_at
+    ) VALUES (
+        p_trade_id, p_market_id, p_maker_order_id, p_taker_order_id,
+        p_price::NUMERIC, p_size::NUMERIC, p_maker_side,
+        NOW(), NOW()
+    )
+    ON CONFLICT (id) DO NOTHING;
+END;
+$$;
+
+-- Atomically check idempotency key and insert an order.
+-- Returns the row and a boolean `is_duplicate`.
+CREATE OR REPLACE FUNCTION fn_create_order_atomic(
+    p_idempotency_key TEXT,
+    p_user_id         TEXT,
+    p_market_id       TEXT,
+    p_side            TEXT,
+    p_type            TEXT,
+    p_price           TEXT,
+    p_size            TEXT,
+    p_remaining       TEXT
+) RETURNS TABLE(
+    id              UUID,
+    idempotency_key TEXT,
+    user_id         TEXT,
+    market_id       TEXT,
+    side            TEXT,
+    "type"          TEXT,
+    price           NUMERIC,
+    size            NUMERIC,
+    remaining       NUMERIC,
+    status          TEXT,
+    created_at      TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ,
+    deleted_at      TIMESTAMPTZ,
+    is_duplicate    BOOLEAN
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+    -- Fast-path: idempotency check inside the same transaction
+    IF p_idempotency_key IS NOT NULL AND p_idempotency_key <> '' THEN
+        RETURN QUERY
+            SELECT o.*, TRUE
+            FROM orders o
+            WHERE o.idempotency_key = p_idempotency_key
+              AND o.deleted_at IS NULL
+            LIMIT 1;
+        IF FOUND THEN RETURN; END IF;
+    END IF;
+
+    -- Insert; on unique-violation (race), return existing row
+    BEGIN
+        RETURN QUERY
+            INSERT INTO orders (
+                id, idempotency_key, user_id, market_id,
+                side, "type", price, size, remaining,
+                status, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                NULLIF(p_idempotency_key, ''),
+                p_user_id, p_market_id,
+                p_side, p_type,
+                p_price::NUMERIC, p_size::NUMERIC, p_remaining::NUMERIC,
+                'pending', NOW(), NOW()
+            )
+            RETURNING *, FALSE;
+    EXCEPTION WHEN unique_violation THEN
+        RETURN QUERY
+            SELECT o.*, TRUE
+            FROM orders o
+            WHERE o.idempotency_key = p_idempotency_key
+              AND o.deleted_at IS NULL
+            LIMIT 1;
+    END;
+END;
+$$;
+
+-- Atomically check email uniqueness and insert a user.
+-- Raises 'EMAIL_TAKEN' on duplicate so the Go layer can
+-- distinguish from other constraint errors.
+CREATE OR REPLACE FUNCTION fn_register_user_atomic(
+    p_email         TEXT,
+    p_name          TEXT,
+    p_avatar_url    TEXT,
+    p_password_hash TEXT,
+    p_role          TEXT
+) RETURNS SETOF users
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM users WHERE email = p_email AND deleted_at IS NULL) THEN
+        RAISE EXCEPTION 'EMAIL_TAKEN';
+    END IF;
+
+    BEGIN
+        RETURN QUERY
+        INSERT INTO users (id, email, name, avatar_url, password_hash, role, created_at, updated_at)
+        VALUES (
+            gen_random_uuid(), p_email,
+            COALESCE(p_name, ''), COALESCE(p_avatar_url, ''),
+            p_password_hash, p_role, NOW(), NOW()
+        )
+        RETURNING *;
+    EXCEPTION WHEN unique_violation THEN
+        RAISE EXCEPTION 'EMAIL_TAKEN';
+    END;
+END;
+$$;
+
+-- Atomically find a user by ID, check email uniqueness if changed,
+-- and update the row. Returns the updated user row.
+CREATE OR REPLACE FUNCTION fn_update_profile_atomic(
+    p_id         TEXT,
+    p_email      TEXT,
+    p_name       TEXT,
+    p_avatar_url TEXT
+) RETURNS SETOF users
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_user users%ROWTYPE;
+BEGIN
+    SELECT * INTO v_user FROM users
+    WHERE id = p_id::UUID AND deleted_at IS NULL
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'USER_NOT_FOUND';
+    END IF;
+
+    -- Email uniqueness check (skip if unchanged)
+    IF p_email IS DISTINCT FROM v_user.email THEN
+        IF EXISTS (
+            SELECT 1 FROM users
+            WHERE email = p_email AND deleted_at IS NULL AND id <> p_id::UUID
+        ) THEN
+            RAISE EXCEPTION 'EMAIL_TAKEN';
+        END IF;
+    END IF;
+
+    UPDATE users SET
+        email      = COALESCE(p_email, v_user.email),
+        name       = COALESCE(p_name, v_user.name),
+        avatar_url = COALESCE(p_avatar_url, v_user.avatar_url),
+        updated_at = NOW()
+    WHERE id = p_id::UUID AND deleted_at IS NULL;
+
+    RETURN QUERY SELECT * FROM users WHERE id = p_id::UUID;
+END;
+$$;
+
 -- ===================  TRADES  ================================
 
 CREATE OR REPLACE FUNCTION fn_create_trade_if_not_exists(

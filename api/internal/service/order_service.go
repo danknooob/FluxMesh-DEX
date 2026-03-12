@@ -10,14 +10,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// OrderService implements order creation and cancellation.
 type OrderService struct {
-	repo       *repository.OrderRepository
-	markets    MarketService
-	producer   *kafka.Producer
+	repo     *repository.OrderRepository
+	markets  MarketService
+	producer *kafka.Producer
 }
 
-// NewOrderService creates an OrderService.
 func NewOrderService(
 	repo *repository.OrderRepository,
 	markets MarketService,
@@ -26,7 +24,6 @@ func NewOrderService(
 	return &OrderService{repo: repo, markets: markets, producer: producer}
 }
 
-// CreateLimitOrderRequest is the input for creating a limit order.
 type CreateLimitOrderRequest struct {
 	UserID         string `json:"user_id"`
 	MarketID       string `json:"market_id"`
@@ -37,19 +34,9 @@ type CreateLimitOrderRequest struct {
 }
 
 // CreateLimitOrder validates, persists, and publishes orders.created.
-// If an IdempotencyKey is provided and an order with that key already exists,
-// the original order is returned without creating a duplicate.
+// The idempotency check + insert is handled atomically by the stored
+// function fn_create_order_atomic, eliminating TOCTOU race conditions.
 func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrderRequest) (*models.Order, bool, error) {
-	if req.IdempotencyKey != "" {
-		existing, err := s.repo.FindByIdempotencyKey(ctx, req.IdempotencyKey)
-		if err != nil {
-			return nil, false, err
-		}
-		if existing != nil {
-			return existing, true, nil
-		}
-	}
-
 	market, err := s.markets.GetMarket(ctx, req.MarketID)
 	if err != nil || market == nil {
 		return nil, false, err
@@ -74,27 +61,31 @@ func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrde
 		Remaining:      req.Size,
 		Status:         models.OrderStatusPending,
 	}
-	if err := s.repo.Create(ctx, o); err != nil {
+
+	isDuplicate, err := s.repo.CreateAtomic(ctx, o)
+	if err != nil {
 		return nil, false, err
 	}
 
-	event := map[string]interface{}{
-		"order_id":  o.ID.String(),
-		"user_id":   o.UserID,
-		"market_id": o.MarketID,
-		"side":      string(o.Side),
-		"type":      string(o.Type),
-		"price":     o.Price,
-		"size":      o.Size,
-		"remaining": o.Remaining,
+	if !isDuplicate {
+		event := map[string]interface{}{
+			"order_id":  o.ID.String(),
+			"user_id":   o.UserID,
+			"market_id": o.MarketID,
+			"side":      string(o.Side),
+			"type":      string(o.Type),
+			"price":     o.Price,
+			"size":      o.Size,
+			"remaining": o.Remaining,
+		}
+		if err := s.producer.PublishOrderCreated(ctx, event); err != nil {
+			log.Printf("publish orders.created failed: %v", err)
+		}
 	}
-	if err := s.producer.PublishOrderCreated(ctx, event); err != nil {
-		log.Printf("publish orders.created failed: %v", err)
-	}
-	return o, false, nil
+
+	return o, isDuplicate, nil
 }
 
-// CancelOrder cancels an order and publishes orders.cancelled.
 func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userID string) error {
 	if err := s.repo.Delete(ctx, orderID, userID); err != nil {
 		return err
@@ -105,9 +96,6 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userI
 	})
 }
 
-// ListOrders returns orders for a user with optional filters.
-// Later, different market types (spot, perps, etc.) can project this
-// base order stream into specialized views without changing the interface.
 func (s *OrderService) ListOrders(ctx context.Context, userID, marketID, status string) ([]models.Order, error) {
 	filter := repository.OrderFilter{
 		UserID:   userID,
@@ -117,18 +105,15 @@ func (s *OrderService) ListOrders(ctx context.Context, userID, marketID, status 
 	return s.repo.List(ctx, filter)
 }
 
-// GetOrder returns a single order by ID.
 func (s *OrderService) GetOrder(ctx context.Context, id uuid.UUID) (*models.Order, error) {
 	return s.repo.GetByID(ctx, id)
 }
 
-// DepthResponse is the aggregated order book for a market.
 type DepthResponse struct {
 	Bids []repository.PriceLevel `json:"bids"`
 	Asks []repository.PriceLevel `json:"asks"`
 }
 
-// GetDepth returns aggregated bids and asks for a market.
 func (s *OrderService) GetDepth(ctx context.Context, marketID string, limit int) (*DepthResponse, error) {
 	bids, err := s.repo.Depth(ctx, marketID, "buy", limit)
 	if err != nil {

@@ -26,14 +26,16 @@ type Order struct {
 }
 
 type Fill struct {
-	TradeID      string
-	MarketID     string
-	MakerOrderID string
-	TakerOrderID string
-	Price        decimal.Decimal
-	Size         decimal.Decimal
-	MakerSide    Side
-	Ts           time.Time
+	TradeID        string
+	MarketID       string
+	MakerOrderID   string
+	TakerOrderID   string
+	Price          decimal.Decimal
+	Size           decimal.Decimal
+	MakerSide      Side
+	MakerRemaining decimal.Decimal
+	TakerRemaining decimal.Decimal
+	Ts             time.Time
 }
 
 type OrderBook interface {
@@ -83,13 +85,15 @@ func (b *priceTimeOrderBook) MatchIncoming(in *Order) []Fill {
 			in.Remaining = in.Remaining.Sub(fillSize)
 			ask.Remaining = ask.Remaining.Sub(fillSize)
 			fills = append(fills, Fill{
-				MarketID:     b.marketID,
-				MakerOrderID: ask.ID,
-				TakerOrderID: in.ID,
-				Price:        ask.Price,
-				Size:         fillSize,
-				MakerSide:    SideSell,
-				Ts:           now,
+				MarketID:       b.marketID,
+				MakerOrderID:   ask.ID,
+				TakerOrderID:   in.ID,
+				Price:          ask.Price,
+				Size:           fillSize,
+				MakerSide:      SideSell,
+				MakerRemaining: ask.Remaining,
+				TakerRemaining: in.Remaining,
+				Ts:             now,
 			})
 		}
 		b.asks = pruneFilledOrders(b.asks)
@@ -116,13 +120,15 @@ func (b *priceTimeOrderBook) MatchIncoming(in *Order) []Fill {
 			in.Remaining = in.Remaining.Sub(fillSize)
 			bid.Remaining = bid.Remaining.Sub(fillSize)
 			fills = append(fills, Fill{
-				MarketID:     b.marketID,
-				MakerOrderID: bid.ID,
-				TakerOrderID: in.ID,
-				Price:        bid.Price,
-				Size:         fillSize,
-				MakerSide:    SideBuy,
-				Ts:           now,
+				MarketID:       b.marketID,
+				MakerOrderID:   bid.ID,
+				TakerOrderID:   in.ID,
+				Price:          bid.Price,
+				Size:           fillSize,
+				MakerSide:      SideBuy,
+				MakerRemaining: bid.Remaining,
+				TakerRemaining: in.Remaining,
+				Ts:             now,
 			})
 		}
 		b.bids = pruneFilledOrders(b.bids)

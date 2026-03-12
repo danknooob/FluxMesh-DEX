@@ -3,14 +3,16 @@ package model
 // OrderMatchedEvent is the Kafka payload from the matching engine.
 // Price and Size are decimal strings (shopspring/decimal on the producer side).
 type OrderMatchedEvent struct {
-	TradeID      string `json:"trade_id"`
-	MarketID     string `json:"market_id"`
-	MakerOrderID string `json:"maker_order_id"`
-	TakerOrderID string `json:"taker_order_id"`
-	Price        string `json:"price"`
-	Size         string `json:"size"`
-	MakerSide    string `json:"maker_side"`
-	Ts           string `json:"ts"`
+	TradeID        string `json:"trade_id"`
+	MarketID       string `json:"market_id"`
+	MakerOrderID   string `json:"maker_order_id"`
+	TakerOrderID   string `json:"taker_order_id"`
+	Price          string `json:"price"`
+	Size           string `json:"size"`
+	MakerSide      string `json:"maker_side"`
+	MakerRemaining string `json:"maker_remaining"`
+	TakerRemaining string `json:"taker_remaining"`
+	Ts             string `json:"ts"`
 }
 
 // OrderRejectedEvent is the Kafka payload for a rejected order.

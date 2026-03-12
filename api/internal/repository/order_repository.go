@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
 	"github.com/google/uuid"
@@ -106,6 +107,60 @@ func (r *OrderRepository) Update(ctx context.Context, o *models.Order) error {
 func (r *OrderRepository) Delete(ctx context.Context, id uuid.UUID, userID string) error {
 	return r.db.WithContext(ctx).
 		Exec("SELECT fn_cancel_order($1,$2)", id.String(), userID).Error
+}
+
+// CreateAtomic atomically checks the idempotency key and inserts the order.
+// On a duplicate key (including race conditions), it returns the existing
+// order and isDuplicate=true instead of an error.
+func (r *OrderRepository) CreateAtomic(ctx context.Context, o *models.Order) (isDuplicate bool, err error) {
+	type row struct {
+		ID             uuid.UUID      `gorm:"column:id"`
+		IdempotencyKey *string        `gorm:"column:idempotency_key"`
+		UserID         string         `gorm:"column:user_id"`
+		MarketID       string         `gorm:"column:market_id"`
+		Side           string         `gorm:"column:side"`
+		Type           string         `gorm:"column:type"`
+		Price          string         `gorm:"column:price"`
+		Size           string         `gorm:"column:size"`
+		Remaining      string         `gorm:"column:remaining"`
+		Status         string         `gorm:"column:status"`
+		CreatedAt      time.Time      `gorm:"column:created_at"`
+		UpdatedAt      time.Time      `gorm:"column:updated_at"`
+		DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
+		IsDuplicate    bool           `gorm:"column:is_duplicate"`
+	}
+
+	var rows []row
+	if err := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_create_order_atomic($1,$2,$3,$4,$5,$6,$7,$8)",
+			o.IdempotencyKey, o.UserID, o.MarketID,
+			string(o.Side), string(o.Type),
+			o.Price, o.Size, o.Remaining,
+		).Scan(&rows).Error; err != nil {
+		return false, err
+	}
+	if len(rows) == 0 {
+		return false, gorm.ErrRecordNotFound
+	}
+
+	res := rows[0]
+	o.ID = res.ID
+	if res.IdempotencyKey != nil {
+		o.IdempotencyKey = *res.IdempotencyKey
+	}
+	o.UserID = res.UserID
+	o.MarketID = res.MarketID
+	o.Side = models.OrderSide(res.Side)
+	o.Type = models.OrderType(res.Type)
+	o.Price = res.Price
+	o.Size = res.Size
+	o.Remaining = res.Remaining
+	o.Status = models.OrderStatus(res.Status)
+	o.CreatedAt = res.CreatedAt
+	o.UpdatedAt = res.UpdatedAt
+	o.DeletedAt = res.DeletedAt
+
+	return res.IsDuplicate, nil
 }
 
 func nilIfEmpty(s string) interface{} {

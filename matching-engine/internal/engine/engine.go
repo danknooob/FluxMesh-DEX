@@ -147,14 +147,16 @@ func (e *Engine) ProcessCreated(ctx context.Context, evt OrdersCreatedEvent) err
 			f.TradeID = uuid.NewString()
 		}
 		payload := map[string]interface{}{
-			"trade_id":       f.TradeID,
-			"market_id":      f.MarketID,
-			"maker_order_id": f.MakerOrderID,
-			"taker_order_id": f.TakerOrderID,
-			"price":          f.Price.String(),
-			"size":           f.Size.String(),
-			"maker_side":     string(f.MakerSide),
-			"ts":             f.Ts,
+			"trade_id":         f.TradeID,
+			"market_id":        f.MarketID,
+			"maker_order_id":   f.MakerOrderID,
+			"taker_order_id":   f.TakerOrderID,
+			"price":            f.Price.String(),
+			"size":             f.Size.String(),
+			"maker_side":       string(f.MakerSide),
+			"maker_remaining":  f.MakerRemaining.String(),
+			"taker_remaining":  f.TakerRemaining.String(),
+			"ts":               f.Ts,
 		}
 		if err := e.prod.PublishOrdersMatched(ctx, payload); err != nil {
 			log.Printf("engine: failed to publish orders.matched: %v", err)
