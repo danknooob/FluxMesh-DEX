@@ -107,7 +107,9 @@ func (c *OrderController) Depth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(depth)
 }
 
-// Delete cancels an order (DELETE /orders/:id).
+// Delete cancels a resting order (DELETE /orders/:id).
+// Returns 200 + cancelled order on success, 404 if not found,
+// 409 if the order is in a non-cancellable state (filled, rejected, etc.).
 func (c *OrderController) Delete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -129,9 +131,19 @@ func (c *OrderController) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.orderService.CancelOrder(r.Context(), id, userID); err != nil {
-		http.Error(w, "cancel failed", http.StatusInternalServerError)
+	order, err := c.orderService.CancelOrder(r.Context(), id, userID)
+	if err != nil {
+		switch err {
+		case service.ErrOrderNotFound:
+			http.Error(w, "order not found", http.StatusNotFound)
+		case service.ErrOrderNotCancellable:
+			http.Error(w, "order cannot be cancelled (already filled, rejected, or cancelled)", http.StatusConflict)
+		default:
+			http.Error(w, "cancel failed", http.StatusInternalServerError)
+		}
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(order)
 }

@@ -104,9 +104,21 @@ func (r *OrderRepository) Update(ctx context.Context, o *models.Order) error {
 		).Error
 }
 
-func (r *OrderRepository) Delete(ctx context.Context, id uuid.UUID, userID string) error {
-	return r.db.WithContext(ctx).
-		Exec("SELECT fn_cancel_order($1,$2)", id.String(), userID).Error
+// Delete cancels an order via the guarded stored function.
+// Returns the cancelled order on success, or a Postgres exception
+// containing ORDER_NOT_FOUND / ORDER_NOT_CANCELLABLE on failure.
+func (r *OrderRepository) Delete(ctx context.Context, id uuid.UUID, userID string) (*models.Order, error) {
+	var o models.Order
+	result := r.db.WithContext(ctx).
+		Raw("SELECT * FROM fn_cancel_order($1,$2)", id.String(), userID).
+		Scan(&o)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &o, nil
 }
 
 // CreateAtomic atomically checks the idempotency key and inserts the order.
@@ -124,6 +136,7 @@ func (r *OrderRepository) CreateAtomic(ctx context.Context, o *models.Order) (is
 		Size           string         `gorm:"column:size"`
 		Remaining      string         `gorm:"column:remaining"`
 		Status         string         `gorm:"column:status"`
+		CancelFee      string         `gorm:"column:cancel_fee"`
 		CreatedAt      time.Time      `gorm:"column:created_at"`
 		UpdatedAt      time.Time      `gorm:"column:updated_at"`
 		DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at"`
@@ -156,6 +169,7 @@ func (r *OrderRepository) CreateAtomic(ctx context.Context, o *models.Order) (is
 	o.Size = res.Size
 	o.Remaining = res.Remaining
 	o.Status = models.OrderStatus(res.Status)
+	o.CancelFee = res.CancelFee
 	o.CreatedAt = res.CreatedAt
 	o.UpdatedAt = res.UpdatedAt
 	o.DeletedAt = res.DeletedAt

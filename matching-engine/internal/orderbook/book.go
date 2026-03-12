@@ -41,6 +41,7 @@ type Fill struct {
 type OrderBook interface {
 	MatchIncoming(incoming *Order) (fills []Fill)
 	Add(order *Order)
+	Cancel(orderID string) bool
 }
 
 type priceTimeOrderBook struct {
@@ -148,6 +149,24 @@ func (b *priceTimeOrderBook) Add(order *Order) {
 	case SideSell:
 		b.asks = append(b.asks, order)
 	}
+}
+
+// Cancel removes a resting order from the book by ID.
+// Returns true if the order was found and removed.
+func (b *priceTimeOrderBook) Cancel(orderID string) bool {
+	for i, o := range b.bids {
+		if o.ID == orderID {
+			b.bids = append(b.bids[:i], b.bids[i+1:]...)
+			return true
+		}
+	}
+	for i, o := range b.asks {
+		if o.ID == orderID {
+			b.asks = append(b.asks[:i], b.asks[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 func pruneFilledOrders(orders []*Order) []*Order {

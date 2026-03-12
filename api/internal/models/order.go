@@ -46,6 +46,7 @@ type Order struct {
 	Size           string         `gorm:"type:numeric;not null" json:"size"`
 	Remaining      string         `gorm:"type:numeric" json:"remaining"`
 	Status         OrderStatus    `gorm:"not null;default:pending" json:"status"`
+	CancelFee      string         `gorm:"type:numeric;default:0" json:"cancel_fee"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`

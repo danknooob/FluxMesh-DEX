@@ -23,6 +23,12 @@ type OrdersCreatedEvent struct {
 	Size     string `json:"size"`
 }
 
+type OrdersCancelledEvent struct {
+	OrderID  string `json:"order_id"`
+	UserID   string `json:"user_id"`
+	MarketID string `json:"market_id"`
+}
+
 type EventProducer interface {
 	PublishOrdersMatched(ctx context.Context, payload interface{}) error
 	PublishOrdersRejected(ctx context.Context, payload interface{}) error
@@ -164,6 +170,32 @@ func (e *Engine) ProcessCreated(ctx context.Context, evt OrdersCreatedEvent) err
 		}
 	}
 	return nil
+}
+
+// ProcessCancelled removes a resting order from the in-memory book.
+// If the event carries a market_id, we target that book directly;
+// otherwise we fall back to scanning all books.
+func (e *Engine) ProcessCancelled(_ context.Context, evt OrdersCancelledEvent) {
+	if evt.MarketID != "" {
+		e.mu.RLock()
+		book, ok := e.books[evt.MarketID]
+		e.mu.RUnlock()
+		if ok && book.Cancel(evt.OrderID) {
+			log.Printf("engine: cancelled order %s on market %s (user %s)",
+				evt.OrderID, evt.MarketID, evt.UserID)
+			return
+		}
+	}
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, book := range e.books {
+		if book.Cancel(evt.OrderID) {
+			log.Printf("engine: cancelled order %s (user %s)", evt.OrderID, evt.UserID)
+			return
+		}
+	}
+	log.Printf("engine: cancel order %s not found on any book (already filled or never rested)", evt.OrderID)
 }
 
 func (e *Engine) reject(ctx context.Context, evt OrdersCreatedEvent, reason string) error {

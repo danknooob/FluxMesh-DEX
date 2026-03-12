@@ -55,7 +55,7 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 | `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy ([SERVICE.md](gateway/SERVICE.md)) |
 | `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) |
 | `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) ([SERVICE.md](api/SERVICE.md)) |
-| `matching-engine/` | Order-book matching; consumes `orders.created`, emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
+| `matching-engine/` | Order-book matching; consumes `orders.created` and `orders.cancelled`; emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
 | `indexer/` | Kafka → Postgres projector; updates order statuses, creates trade records, upserts balances ([SERVICE.md](indexer/SERVICE.md)) |
 | `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` ([SERVICE.md](settlement/SERVICE.md)) |
 | `notification/` | WebSocket service; consumes domain + notification topics ([SERVICE.md](notification/SERVICE.md)) |
@@ -202,6 +202,82 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 | `/trade/balances` | Yes | User balances |
 | `/trade/profile` | Yes | View/edit profile, delete account |
 | `/admin/*` | Yes (admin) | Config, health dashboard |
+
+## Order Cancellation
+
+Orders flow through a strict lifecycle. Cancellation is only allowed on **resting** orders that have not yet been fully executed.
+
+### Cancellation Rules
+
+| Order Status | Cancellable? | Behaviour |
+|:-------------|:---:|-----------|
+| **Pending** (resting on book) | Yes | Full cancel — remaining quantity removed from book |
+| **Partial** (partially filled) | Remaining only | Unfilled portion is cancelled; filled portion is final |
+| **Matched** (fully filled) | No | Trade already executed, position taken |
+| **Rejected** | No | Order was never on the book |
+| **Cancelled** | No | Already cancelled |
+| **Market order** | No | Executes instantly at market price — never rests on the book |
+| **Post-settlement** | No | On-chain settlement is final |
+
+### Cancellation Fee
+
+Every cancellation incurs a small fee to discourage order-book spam:
+
+```
+cancel_fee = remaining_qty × price × market.cancel_fee_rate
+```
+
+| Rule | Detail |
+|------|--------|
+| **Fee rate** | Per-market, stored in `markets.cancel_fee_rate` (default 0.05% / 5 bps) |
+| **Fee asset** | Quote asset for buy orders (e.g. USDC), base asset for sell orders (e.g. BTC) |
+| **Cap** | Fee is capped at the user's available balance — never goes negative |
+| **Deduction** | Fee is deducted atomically from the user's balance inside the stored procedure |
+| **Audit** | Fee amount is recorded on the order (`orders.cancel_fee`) and included in the `orders.cancelled` Kafka event |
+
+### Cancel Flow (End-to-End)
+
+```
+DELETE /orders/:id  →  API Service  →  fn_cancel_order (Postgres stored proc)
+                                            │  Row lock (SELECT FOR UPDATE)
+                                            │  Status & type guard
+                                            │  Compute & deduct fee
+                                            │  Set status = 'cancelled'
+                                            ▼
+                                    Kafka: orders.cancelled
+                                            │
+                    ┌───────────────────┬────┴──────────────────┐
+                    ▼                   ▼                       ▼
+            Matching Engine        Indexer                Event Log
+          (remove from book)   (update Postgres)       (MongoDB audit)
+```
+
+### HTTP Responses
+
+| Scenario | Status | Body |
+|----------|:------:|------|
+| Order cancelled | `200 OK` | Cancelled order JSON (includes `cancel_fee`) |
+| Order not found | `404 Not Found` | `"order not found"` |
+| Non-cancellable state | `409 Conflict` | `"order cannot be cancelled (already filled, rejected, or cancelled)"` |
+
+## Stored Procedures (PostgreSQL)
+
+All database access goes through **PL/pgSQL stored functions** (`CREATE OR REPLACE FUNCTION`), giving us:
+
+- **Atomicity** — multi-step mutations (e.g. cancel + fee deduction) run in a single transaction
+- **Row-level locking** — `SELECT ... FOR UPDATE` prevents concurrent modifications
+- **Centralized business rules** — status guards and fee logic live in SQL, not scattered in Go code
+- **Idempotency** — `CREATE OR REPLACE` makes migrations safe to re-run on every startup
+
+| Function | Purpose |
+|----------|---------|
+| `fn_create_order_atomic` | Idempotency check + insert in one transaction |
+| `fn_cancel_order` | Status/type guard + cancellation fee + balance deduction |
+| `fn_process_order_matched` | Atomically update both order statuses + insert trade record |
+| `fn_register_user_atomic` | Email uniqueness check + insert (catches race via `EXCEPTION`) |
+| `fn_update_profile_atomic` | Row lock + email uniqueness + update |
+| `fn_upsert_balance` | `INSERT ... ON CONFLICT DO UPDATE` for balance projections |
+| 13 more | CRUD for orders, users, markets, balances, trades |
 
 ## Resilience & Retry Strategy
 

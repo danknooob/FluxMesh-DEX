@@ -141,15 +141,51 @@ BEGIN
 END;
 $$;
 
+-- Guarded cancel — enforces cancellation rules:
+--
+--   Status      | Cancellable? | Reason
+--   ------------|-------------|-----------------------------------
+--   pending     | YES         | Not yet matched
+--   partial     | YES         | Cancels remaining qty only
+--   matched     | NO          | Trade already executed
+--   rejected    | NO          | Already terminal
+--   cancelled   | NO          | Already cancelled
+--   market type | NO          | Executes instantly at market price
+--
+-- Raises ORDER_NOT_FOUND or ORDER_NOT_CANCELLABLE on failure.
+-- Returns the updated order row on success.
 CREATE OR REPLACE FUNCTION fn_cancel_order(p_id TEXT, p_user_id TEXT)
-RETURNS VOID
+RETURNS SETOF orders
 LANGUAGE plpgsql AS $$
+DECLARE
+    v_order orders%ROWTYPE;
 BEGIN
-    UPDATE orders
-    SET status = 'cancelled', updated_at = NOW()
+    SELECT * INTO v_order
+    FROM orders
     WHERE id = p_id::UUID
       AND user_id = p_user_id
-      AND deleted_at IS NULL;
+      AND deleted_at IS NULL
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ORDER_NOT_FOUND';
+    END IF;
+
+    IF v_order."type" = 'market' THEN
+        RAISE EXCEPTION 'ORDER_NOT_CANCELLABLE:market orders execute instantly';
+    END IF;
+
+    IF v_order.status NOT IN ('pending', 'partial') THEN
+        RAISE EXCEPTION 'ORDER_NOT_CANCELLABLE:order is already %', v_order.status;
+    END IF;
+
+    UPDATE orders
+    SET status     = 'cancelled',
+        updated_at = NOW()
+    WHERE id = p_id::UUID;
+
+    RETURN QUERY
+    SELECT * FROM orders WHERE id = p_id::UUID;
 END;
 $$;
 
@@ -370,6 +406,7 @@ CREATE OR REPLACE FUNCTION fn_create_order_atomic(
     size            NUMERIC,
     remaining       NUMERIC,
     status          TEXT,
+    cancel_fee      NUMERIC,
     created_at      TIMESTAMPTZ,
     updated_at      TIMESTAMPTZ,
     deleted_at      TIMESTAMPTZ,

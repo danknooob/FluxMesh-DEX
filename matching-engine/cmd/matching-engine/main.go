@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,7 +18,6 @@ import (
 func main() {
 	brokers := []string{"localhost:9092"}
 	if env := os.Getenv("KAFKA_BROKERS"); env != "" {
-		// simplistic split: "host1:9092,host2:9092"
 		parts := strings.Split(env, ",")
 		if len(parts) > 0 {
 			brokers = parts
@@ -30,46 +30,97 @@ func main() {
 	prod := engine.NewKafkaProducer(brokers, "orders.matched", "orders.rejected")
 	eng := engine.NewEngine(prod)
 
-	reader := kafka.NewReader(kafka.ReaderConfig{
+	createdReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  brokers,
 		Topic:    "orders.created",
-		GroupID:  "matching-engine", // stable group id so committed offsets are not re-read
+		GroupID:  "matching-engine",
 		MinBytes: 1,
 		MaxBytes: 10e6,
 	})
-	defer reader.Close()
+	defer createdReader.Close()
 
-	log.Println("matching-engine: consuming from topic orders.created")
+	cancelledReader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers:  brokers,
+		Topic:    "orders.cancelled",
+		GroupID:  "matching-engine",
+		MinBytes: 1,
+		MaxBytes: 10e6,
+	})
+	defer cancelledReader.Close()
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		consumeCreated(ctx, createdReader, eng)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		consumeCancelled(ctx, cancelledReader, eng)
+	}()
+
+	log.Println("matching-engine: consuming orders.created + orders.cancelled")
+	wg.Wait()
+	log.Println("matching-engine: shutdown complete")
+}
+
+func consumeCreated(ctx context.Context, r *kafka.Reader, eng *engine.Engine) {
 	for {
-		m, err := reader.FetchMessage(ctx)
+		m, err := r.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log.Println("matching-engine: shutting down")
 				return
 			}
-			log.Printf("matching-engine: read error: %v", err)
+			log.Printf("matching-engine: read error (created): %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
 		var evt engine.OrdersCreatedEvent
 		if err := json.Unmarshal(m.Value, &evt); err != nil {
-			log.Printf("matching-engine: failed to unmarshal event: %v", err)
+			log.Printf("matching-engine: unmarshal error (created): %v", err)
+			_ = r.CommitMessages(ctx, m)
 			continue
 		}
+
 		if err := eng.ProcessCreated(ctx, evt); err != nil {
-			log.Printf("matching-engine: failed to process event: %v", err)
-			// Do not commit offset so that the message can be retried.
+			log.Printf("matching-engine: process created error: %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
 
-		if err := reader.CommitMessages(ctx, m); err != nil {
-			log.Printf("matching-engine: failed to commit message: %v", err)
-			time.Sleep(time.Second)
-			continue
+		if err := r.CommitMessages(ctx, m); err != nil {
+			log.Printf("matching-engine: commit error (created): %v", err)
 		}
 	}
 }
 
+func consumeCancelled(ctx context.Context, r *kafka.Reader, eng *engine.Engine) {
+	for {
+		m, err := r.FetchMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("matching-engine: read error (cancelled): %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		var evt engine.OrdersCancelledEvent
+		if err := json.Unmarshal(m.Value, &evt); err != nil {
+			log.Printf("matching-engine: unmarshal error (cancelled): %v", err)
+			_ = r.CommitMessages(ctx, m)
+			continue
+		}
+
+		eng.ProcessCancelled(ctx, evt)
+
+		if err := r.CommitMessages(ctx, m); err != nil {
+			log.Printf("matching-engine: commit error (cancelled): %v", err)
+		}
+	}
+}

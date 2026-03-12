@@ -86,14 +86,31 @@ func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrde
 	return o, isDuplicate, nil
 }
 
-func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userID string) error {
-	if err := s.repo.Delete(ctx, orderID, userID); err != nil {
-		return err
+// CancelOrder cancels a resting order. Only pending and partial orders
+// are cancellable — filled, rejected, and already-cancelled orders
+// return ErrOrderNotCancellable; missing orders return ErrOrderNotFound.
+func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userID string) (*models.Order, error) {
+	order, err := s.repo.Delete(ctx, orderID, userID)
+	if err != nil {
+		if isPgException(err, "ORDER_NOT_FOUND") {
+			return nil, ErrOrderNotFound
+		}
+		if isPgException(err, "ORDER_NOT_CANCELLABLE") {
+			return nil, ErrOrderNotCancellable
+		}
+		return nil, err
 	}
-	return s.producer.PublishOrderCancelled(ctx, map[string]interface{}{
-		"order_id": orderID.String(),
-		"user_id":  userID,
-	})
+
+	if err := s.producer.PublishOrderCancelled(ctx, map[string]interface{}{
+		"order_id":  orderID.String(),
+		"user_id":   userID,
+		"market_id": order.MarketID,
+		"remaining": order.Remaining,
+	}); err != nil {
+		log.Printf("publish orders.cancelled failed: %v", err)
+	}
+
+	return order, nil
 }
 
 func (s *OrderService) ListOrders(ctx context.Context, userID, marketID, status string) ([]models.Order, error) {
