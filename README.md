@@ -21,8 +21,8 @@ Production-grade, event-driven order-book DEX backend with an **API Gateway** (J
                ┌────────────▼──┐   ┌────▼──────────────┐
                │  API Service  │   │  Control Plane     │
                │  :8080        │   │  :8081             │
-               │  Orders       │   │  Config · Health   │
-               │  Markets      │   │  Audit · Commands  │
+               │  Auth/Profile │   │  Config · Health   │
+               │  Orders/Mkts  │   │  Audit · Commands  │
                │  Balances     │   └────────────────────┘
                └───────┬───────┘
                        │  Kafka
@@ -45,8 +45,8 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 
 1. **Gateway** validates JWT, enforces per-user rate limits (token bucket), then injects `X-User-ID` / `X-Role` headers.
 2. **API Service** trusts the gateway headers — no duplicate token parsing, keeping handler latency minimal.
-3. **Functional APIs** (orders, markets, balances) focus purely on business logic with zero auth overhead.
-4. **Event Log** service consumes every Kafka topic and persists events as documents in MongoDB for querying, debugging, and compliance.
+3. **Functional APIs** (orders, markets, balances, profile) focus purely on business logic with zero auth overhead.
+4. **Event Log** service consumes every Kafka topic (including `users.updated` and `users.deleted`) and persists events as documents in MongoDB for querying, debugging, and compliance.
 
 ## Repo Layout
 
@@ -54,7 +54,7 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 |------|-------------|
 | `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy |
 | `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) |
-| `api/` | Go MVC HTTP service (controllers, services, repositories, Kafka producer) |
+| `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) |
 | `matching-engine/` | Order-book matching; consumes `orders.created`, emits `orders.matched` / `orders.rejected` |
 | `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` |
 | `notification/` | WebSocket service; consumes domain + notification topics |
@@ -85,10 +85,11 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 
 | Feature | Detail |
 |---------|--------|
-| **Topics consumed** | All 11 Kafka topics (orders, trades, balances, control, notifications) |
+| **Topics consumed** | All 13 Kafka topics (orders, trades, balances, users, control, notifications) |
 | **Storage** | MongoDB `fluxmesh_events.events` collection |
-| **Document shape** | `{ topic, key, payload, offset, partition, timestamp, stored_at }` |
-| **Indexes** | Compound `(topic, timestamp)` for filtered queries; `stored_at` for TTL/retention |
+| **Document shape** | `{ topic, title, key, payload, offset, partition, timestamp, stored_at }` |
+| **Human-readable titles** | Each event gets an auto-generated title (e.g. "Profile updated: alice@example.com changed name") |
+| **Indexes** | Compound `(topic, timestamp)` for filtered queries; `title` for text search; `stored_at` for TTL/retention |
 | **Offset management** | Explicit `FetchMessage` + `CommitMessages` — only commits after successful MongoDB write |
 | **Use cases** | Audit trail, debugging, compliance, analytics, event replay |
 
@@ -108,6 +109,8 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 | `orders.rejected` | Matching engine | Indexer, Notification, Event log | Failed risk/validation |
 | `trades.settled` | Settlement | Indexer, Notification, Event log | On-chain settlement done |
 | `balances.updated` | Settlement | Indexer, Notification, Event log | Balance changes |
+| `users.updated` | API | Event log | Profile name/email/avatar changes |
+| `users.deleted` | API | Event log | Account soft-deletion |
 | `notifications.user` | Various | Notification service, Event log | User-targeted notifications |
 | `control.config` | Control plane | All data-plane services, Event log | Config/feature flags |
 | `control.health` | Data-plane services | Control plane, Event log | Heartbeats/health |
@@ -164,6 +167,12 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 4. Gateway validates the token and injects identity headers for downstream services
 5. React frontend stores the token in `localStorage` and attaches it via `apiFetch()` wrapper
 
+### User Profile
+
+- `GET /profile` — retrieve current user's profile (name, email, avatar)
+- `PUT /profile` — update name, email, or avatar URL; publishes `users.updated` to Kafka
+- `DELETE /profile` — soft-delete account; publishes `users.deleted` to Kafka
+
 **Dev credentials** (seeded on first startup):
 - Trader: `trader@example.com` / `trader123`
 - Admin: `admin@example.com` / `admin123`
@@ -184,6 +193,7 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 | `/trade/markets` | Yes | Market list |
 | `/trade/markets/:id` | Yes | Order book + place orders |
 | `/trade/balances` | Yes | User balances |
+| `/trade/profile` | Yes | View/edit profile, delete account |
 | `/admin/*` | Yes (admin) | Config, health dashboard |
 
 ## Tradeoffs & Design Notes
@@ -196,12 +206,18 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 - **Why Kafka**: Durable, ordered event log; replay and multiple consumers; aligns with control plane broadcasting.
 - **MCP (Model Context Protocol)**: Lets AI tools interact with the DEX without custom integrations.
 
+## Interactive API Docs (Swagger)
+
+The gateway serves a **Swagger UI** at `http://localhost:8000/docs` — interactive documentation for every endpoint (auth, profile, orders, markets, balances, admin). The OpenAPI spec is at `docs/swagger.yaml`.
+
 ## Docs & Diagrams
 
-- `docs/architecture.md` — Data plane vs control plane
-- `docs/sequence-order-lifecycle.md` — Order lifecycle
-- `docs/sequence-config-lifecycle.md` — Config change lifecycle
+- `docs/architecture.md` — System architecture (gateway, services, data stores)
+- `docs/kafka-topics.md` — All Kafka topics, consumer groups, offset strategy
+- `docs/sequence-order-lifecycle.md` — Order lifecycle sequence diagram
+- `docs/sequence-config-lifecycle.md` — Config change lifecycle sequence diagram
 - `docs/mcp-model-context-protocol.md` — MCP server and tools for AI
+- `docs/swagger.yaml` — OpenAPI 3.0 specification
 
 ## License
 

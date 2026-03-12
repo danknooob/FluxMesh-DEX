@@ -41,24 +41,27 @@ func main() {
 	orderRepo := repository.NewOrderRepository(db)
 	marketRepo := repository.NewMarketRepository(db)
 
-	userSvc := service.NewUserService(userRepo)
+	userSvc := service.NewUserService(userRepo, producer)
 	marketSvc := service.NewMarketService(marketRepo)
 	orderSvc := service.NewOrderService(orderRepo, marketSvc, producer)
 
 	authCtrl := handler.NewAuthController(cfg, userSvc)
+	profileCtrl := handler.NewProfileController(userSvc)
 	orderCtrl := handler.NewOrderController(orderSvc)
 	marketCtrl := handler.NewMarketController(marketSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.StripSlashes)
 
-	// Public auth routes — gateway forwards without JWT check.
 	r.Post("/auth/login", authCtrl.Login)
 	r.Post("/auth/register", authCtrl.Register)
 
-	// Protected routes — gateway has already validated JWT and injected headers.
 	r.Group(func(gr chi.Router) {
 		gr.Use(auth.GatewayMiddleware)
+
+		gr.Get("/profile", profileCtrl.Get)
+		gr.Put("/profile", profileCtrl.Update)
+		gr.Delete("/profile", profileCtrl.Delete)
 
 		gr.Get("/orders", orderCtrl.List)
 		gr.Post("/orders", orderCtrl.Create)

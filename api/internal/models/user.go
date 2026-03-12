@@ -17,6 +17,8 @@ const (
 type User struct {
 	ID           uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
 	Email        string         `gorm:"uniqueIndex;not null" json:"email"`
+	Name         string         `gorm:"default:''" json:"name"`
+	AvatarURL    string         `gorm:"default:''" json:"avatar_url"`
 	PasswordHash string         `gorm:"not null" json:"-"`
 	Role         UserRole       `gorm:"not null;default:trader" json:"role"`
 	CreatedAt    time.Time      `json:"created_at"`

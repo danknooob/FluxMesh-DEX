@@ -10,6 +10,8 @@
 | `orders.rejected` | Matching engine | Indexer, Notification, Event log | Failed risk/validation |
 | `trades.settled` | Settlement | Indexer, Notification, Event log | On-chain settlement done |
 | `balances.updated` | Settlement | Indexer, Notification, Event log | Balance changes |
+| `users.updated` | API | Event log | Profile name/email/avatar changes |
+| `users.deleted` | API | Event log | Account soft-deletion |
 | `notifications.user` | Various | Notification service, Event log | User-targeted notifications |
 
 ## Control Plane
@@ -29,7 +31,7 @@
 | Settlement | `settlement` | `orders.matched` |
 | Indexer | `indexer` | `trades.settled`, `balances.updated`, chain events |
 | Notification | `notification` | Domain topics + `notifications.user` |
-| Event log | `eventlog` | All 11 topics |
+| Event log | `eventlog` | All 13 topics |
 | Data-plane services | Per-service | `control.config`, `control.commands` |
 
 ## Offset Management
@@ -45,10 +47,26 @@ Every message from every topic is persisted to MongoDB (`fluxmesh_events.events`
 | Field | Description |
 |-------|-------------|
 | `topic` | Kafka topic name |
-| `title` | Human-readable event title (e.g. "New BTC-USDC order: buy 0.01 @ 62000") |
+| `title` | Human-readable event title (e.g. "New BTC-USDC order: buy 0.01 @ 62000", "Profile updated: alice@example.com changed name") |
 | `key` | Kafka message key |
 | `payload` | Parsed JSON payload as a BSON document |
 | `offset` | Kafka offset |
 | `partition` | Kafka partition |
 | `timestamp` | Original Kafka message timestamp |
 | `stored_at` | When the event was written to MongoDB |
+
+### Title Examples
+
+| Topic | Example Title |
+|-------|---------------|
+| `orders.created` | New BTC-USDC order: buy 0.01 @ 62000 |
+| `orders.matched` | Order matched: abc123 |
+| `orders.rejected` | Order rejected: abc123 |
+| `trades.settled` | Trade settled: abc123 |
+| `balances.updated` | Balance updated for user xyz |
+| `users.updated` | Profile updated: alice@example.com changed name, email |
+| `users.deleted` | Account deleted: user-uuid |
+| `control.config` | Config change |
+| `control.health` | Health heartbeat |
+| `control.audit` | Audit entry |
+| `control.commands` | Command issued |

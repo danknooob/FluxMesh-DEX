@@ -187,6 +187,30 @@ func TitleForEvent(topic string, payload bson.M) string {
 		}
 		return "Control command issued"
 
+	case "users.updated":
+		userID := str("user_id")
+		action := str("action")
+		name := str("name")
+		newEmail := str("new_email")
+		if newEmail != "" {
+			return fmt.Sprintf("Profile updated: user %s changed email to %s", userID, newEmail)
+		}
+		if name != "" {
+			return fmt.Sprintf("Profile updated: user %s set name to %s", userID, name)
+		}
+		if action != "" {
+			return fmt.Sprintf("Profile updated: user %s (%s)", userID, action)
+		}
+		return fmt.Sprintf("Profile updated: user %s", userID)
+
+	case "users.deleted":
+		userID := str("user_id")
+		email := str("email")
+		if email != "" {
+			return fmt.Sprintf("Account deleted: %s (%s)", email, userID)
+		}
+		return fmt.Sprintf("Account deleted: user %s", userID)
+
 	default:
 		return fmt.Sprintf("Event on %s", topic)
 	}

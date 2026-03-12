@@ -9,6 +9,7 @@ import { Home } from './pages/Home';
 import { Markets } from './pages/Markets';
 import { OrderBook } from './pages/OrderBook';
 import { Balances } from './pages/Balances';
+import { Profile } from './pages/Profile';
 import { AdminMarkets } from './pages/admin/AdminMarkets';
 import { AdminHealth } from './pages/admin/AdminHealth';
 
@@ -36,6 +37,7 @@ function App() {
             <Route path="markets" element={<Markets />} />
             <Route path="markets/:marketId" element={<OrderBook />} />
             <Route path="balances" element={<Balances />} />
+            <Route path="profile" element={<Profile />} />
           </Route>
 
           {/* Admin routes — require JWT + admin role */}

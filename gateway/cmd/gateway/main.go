@@ -44,6 +44,10 @@ func main() {
 		gr.Use(middleware.JWTAuth(jwtSecret, false))
 		gr.Use(rl.Handler)
 
+		gr.Get("/profile", apiProxy.ServeHTTP)
+		gr.Put("/profile", apiProxy.ServeHTTP)
+		gr.Delete("/profile", apiProxy.ServeHTTP)
+
 		gr.Get("/markets", apiProxy.ServeHTTP)
 		gr.Get("/markets/{id}", apiProxy.ServeHTTP)
 		gr.Get("/orders", apiProxy.ServeHTTP)

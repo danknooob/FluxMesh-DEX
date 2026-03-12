@@ -27,6 +27,8 @@ tags:
     description: Limit order placement and management
   - name: Balances
     description: User asset balances
+  - name: Profile
+    description: User profile management
   - name: Admin
     description: Control plane admin endpoints (admin role required)
 
@@ -163,6 +165,44 @@ components:
           type: string
           format: date-time
 
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        avatar_url:
+          type: string
+          description: Base64 data URL or external URL
+        role:
+          type: string
+          enum: [trader, admin]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: John Doe
+        email:
+          type: string
+          format: email
+          example: newemail@example.com
+        avatar_url:
+          type: string
+          description: Base64 data URL or external URL
+
     Error:
       type: string
       description: Plain-text error message
@@ -244,6 +284,77 @@ paths:
           description: Invalid body or password too short
         "409":
           description: Email already registered
+
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Get current user profile
+      description: Returns the authenticated user's profile including name, email, avatar, and role.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    put:
+      tags: [Profile]
+      summary: Update profile
+      description: |
+        Update name, email, or avatar. Only provided fields are changed.
+        Publishes a `users.updated` event to Kafka (logged in MongoDB).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "400":
+          description: Invalid body
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found
+        "409":
+          description: Email already taken by another user
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    delete:
+      tags: [Profile]
+      summary: Delete account
+      description: |
+        Permanently soft-deletes the authenticated user's account.
+        Publishes a `users.deleted` event to Kafka (logged in MongoDB).
+      security:
+        - BearerAuth: []
+      responses:
+        "204":
+          description: Account deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /markets:
     get:

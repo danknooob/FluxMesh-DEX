@@ -40,6 +40,13 @@ export function TraderLayout() {
               }}>{auth.role}</span>
             </span>
           )}
+          <NavLink to="/trade/profile" style={({ isActive }) => ({
+            fontSize: '0.8rem', padding: '0.35rem 0.8rem', borderRadius: 8,
+            border: '1px solid ' + (isActive ? '#38bdf8' : '#475569'),
+            color: isActive ? '#38bdf8' : '#94a3b8',
+          })}>
+            Profile
+          </NavLink>
           {auth?.role === 'admin' && (
             <NavLink to="/admin" className="secondary-btn" style={{ fontSize: '0.8rem', padding: '0.35rem 0.8rem' }}>
               Admin

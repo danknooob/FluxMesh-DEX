@@ -20,6 +20,8 @@ var defaultTopics = []string{
 	"trades.settled",
 	"balances.updated",
 	"notifications.user",
+	"users.updated",
+	"users.deleted",
 	"control.config",
 	"control.health",
 	"control.audit",
