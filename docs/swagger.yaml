@@ -447,8 +447,21 @@ paths:
       description: |
         Creates a new limit order. The order is persisted in Postgres and
         published to `orders.created` Kafka topic for async matching.
+
+        **Idempotency**: Send an `Idempotency-Key` header (UUID) to prevent
+        duplicate orders on retries. If a key has already been used, the
+        original order is returned with `200 OK` instead of `202 Accepted`.
       security:
         - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Client-generated UUID to prevent duplicate orders on retries
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
       requestBody:
         required: true
         content:
@@ -458,6 +471,12 @@ paths:
       responses:
         "202":
           description: Order accepted and queued for matching
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "200":
+          description: Duplicate — original order returned (idempotency key already used)
           content:
             application/json:
               schema:

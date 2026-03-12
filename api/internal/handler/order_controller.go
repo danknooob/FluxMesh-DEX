@@ -45,6 +45,8 @@ func (c *OrderController) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // Create parses JSON body and creates a limit order (POST /orders).
+// Supports idempotency via the Idempotency-Key header — if a duplicate
+// key is received, the original order is returned with 200 instead of 202.
 func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -61,8 +63,9 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.UserID = userID
+	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
 
-	order, err := c.orderService.CreateLimitOrder(r.Context(), req)
+	order, duplicate, err := c.orderService.CreateLimitOrder(r.Context(), req)
 	if err != nil {
 		if err == service.ErrMarketDisabled || err == service.ErrInvalidSide {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -72,7 +75,11 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
+	if duplicate {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusAccepted)
+	}
 	_ = json.NewEncoder(w).Encode(order)
 }
 

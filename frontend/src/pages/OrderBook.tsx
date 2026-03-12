@@ -45,10 +45,16 @@ export function OrderBook() {
     setSubmitting(true);
     setError(null);
     setMessage(null);
+
+    const idempotencyKey = crypto.randomUUID();
+
     try {
       const res = await apiFetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           market_id: marketId,
           side,

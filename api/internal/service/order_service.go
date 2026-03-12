@@ -28,40 +28,54 @@ func NewOrderService(
 
 // CreateLimitOrderRequest is the input for creating a limit order.
 type CreateLimitOrderRequest struct {
-	UserID   string `json:"user_id"`
-	MarketID string `json:"market_id"`
-	Side     string `json:"side"`
-	Price    string `json:"price"`
-	Size     string `json:"size"`
+	UserID         string `json:"user_id"`
+	MarketID       string `json:"market_id"`
+	Side           string `json:"side"`
+	Price          string `json:"price"`
+	Size           string `json:"size"`
+	IdempotencyKey string `json:"-"`
 }
 
 // CreateLimitOrder validates, persists, and publishes orders.created.
-func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrderRequest) (*models.Order, error) {
+// If an IdempotencyKey is provided and an order with that key already exists,
+// the original order is returned without creating a duplicate.
+func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrderRequest) (*models.Order, bool, error) {
+	if req.IdempotencyKey != "" {
+		existing, err := s.repo.FindByIdempotencyKey(ctx, req.IdempotencyKey)
+		if err != nil {
+			return nil, false, err
+		}
+		if existing != nil {
+			return existing, true, nil
+		}
+	}
+
 	market, err := s.markets.GetMarket(ctx, req.MarketID)
 	if err != nil || market == nil {
-		return nil, err
+		return nil, false, err
 	}
 	if !market.Enabled {
-		return nil, ErrMarketDisabled
+		return nil, false, ErrMarketDisabled
 	}
 
 	side := models.OrderSide(req.Side)
 	if side != models.OrderSideBuy && side != models.OrderSideSell {
-		return nil, ErrInvalidSide
+		return nil, false, ErrInvalidSide
 	}
 
 	o := &models.Order{
-		UserID:    req.UserID,
-		MarketID:  req.MarketID,
-		Side:      side,
-		Type:      models.OrderTypeLimit,
-		Price:     req.Price,
-		Size:      req.Size,
-		Remaining: req.Size,
-		Status:    models.OrderStatusPending,
+		IdempotencyKey: req.IdempotencyKey,
+		UserID:         req.UserID,
+		MarketID:       req.MarketID,
+		Side:           side,
+		Type:           models.OrderTypeLimit,
+		Price:          req.Price,
+		Size:           req.Size,
+		Remaining:      req.Size,
+		Status:         models.OrderStatusPending,
 	}
 	if err := s.repo.Create(ctx, o); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	event := map[string]interface{}{
@@ -75,11 +89,9 @@ func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrde
 		"remaining": o.Remaining,
 	}
 	if err := s.producer.PublishOrderCreated(ctx, event); err != nil {
-		// Log and still return the order so callers can see the accepted order,
-		// even if the event failed to publish.
 		log.Printf("publish orders.created failed: %v", err)
 	}
-	return o, nil
+	return o, false, nil
 }
 
 // CancelOrder cancels an order and publishes orders.cancelled.

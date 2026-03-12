@@ -25,6 +25,22 @@ type OrderFilter struct {
 	Status   string
 }
 
+// FindByIdempotencyKey returns an existing order with the given key, or nil.
+func (r *OrderRepository) FindByIdempotencyKey(ctx context.Context, key string) (*models.Order, error) {
+	if key == "" {
+		return nil, nil
+	}
+	var o models.Order
+	err := r.db.WithContext(ctx).Where("idempotency_key = ?", key).First(&o).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &o, nil
+}
+
 // Create persists an order.
 func (r *OrderRepository) Create(ctx context.Context, o *models.Order) error {
 	return r.db.WithContext(ctx).Create(o).Error

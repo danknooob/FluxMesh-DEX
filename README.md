@@ -207,9 +207,21 @@ Every layer uses **exponential backoff with jitter** to avoid thundering-herd re
 | **Kafka Producer** | Transient broker/network errors | 3 | 200 ms | Respects context cancellation; non-transient errors (serialization) fail immediately |
 | **Event Log → MongoDB** | All MongoDB write failures | 4 | 300 ms | Drops event after exhausting retries and logs a warning; commits Kafka offset to avoid reprocessing |
 
+### Idempotency Keys (Duplicate Order Prevention)
+
+Even with safe retry logic, a network drop *after* the server accepts the order but *before* the response reaches the client would cause a retry that creates a duplicate. To handle this:
+
+1. **Frontend** generates a `crypto.randomUUID()` per form submission.
+2. Sends it as the `Idempotency-Key` HTTP header on `POST /orders`.
+3. **API Service** checks Postgres for an existing order with that key.
+4. If found → returns the original order with `200 OK` (no duplicate created).
+5. If not found → creates a new order and stores the key (unique index prevents races).
+
+This means the same order submission can be safely retried any number of times and will only ever produce one order in the system.
+
 ### Design Decisions
 
-- **Idempotency guard**: POST/PUT/DELETE are *not* retried after a server response (even 5xx) to prevent duplicate side-effects. They *are* retried on network errors because the request never reached the upstream.
+- **Idempotency guard**: POST/PUT/DELETE are *not* retried after a server response (even 5xx) to prevent duplicate side-effects. They *are* retried on network errors because the request never reached the upstream. Additionally, `POST /orders` uses an `Idempotency-Key` header so even retried network-error requests produce at most one order.
 - **Jitter**: Every backoff includes random jitter to avoid synchronized retry storms across clients.
 - **Fail-fast on auth**: 401 responses are never retried — the frontend immediately clears the token and redirects to login.
 - **Circuit breaking**: Not yet implemented. For a production deployment, wrap the gateway proxy and Kafka producer with a circuit breaker (e.g. `sony/gobreaker`) to avoid hammering a degraded upstream.

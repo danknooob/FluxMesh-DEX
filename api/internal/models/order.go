@@ -36,18 +36,19 @@ const (
 
 // Order is the persisted order entity.
 type Order struct {
-	ID        uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID    string         `gorm:"not null;index" json:"user_id"`
-	MarketID  string         `gorm:"not null;index" json:"market_id"`
-	Side      OrderSide      `gorm:"not null" json:"side"`
-	Type      OrderType      `gorm:"not null" json:"type"`
-	Price     string         `gorm:"type:numeric" json:"price"`
-	Size      string         `gorm:"type:numeric;not null" json:"size"`
-	Remaining string         `gorm:"type:numeric" json:"remaining"`
-	Status    OrderStatus    `gorm:"not null;default:pending" json:"status"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	ID             uuid.UUID      `gorm:"type:uuid;primaryKey" json:"id"`
+	IdempotencyKey string         `gorm:"uniqueIndex;size:64" json:"-"`
+	UserID         string         `gorm:"not null;index" json:"user_id"`
+	MarketID       string         `gorm:"not null;index" json:"market_id"`
+	Side           OrderSide      `gorm:"not null" json:"side"`
+	Type           OrderType      `gorm:"not null" json:"type"`
+	Price          string         `gorm:"type:numeric" json:"price"`
+	Size           string         `gorm:"type:numeric;not null" json:"size"`
+	Remaining      string         `gorm:"type:numeric" json:"remaining"`
+	Status         OrderStatus    `gorm:"not null;default:pending" json:"status"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName overrides table name.
