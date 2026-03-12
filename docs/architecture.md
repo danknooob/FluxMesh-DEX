@@ -97,6 +97,25 @@ DELETE /profile → Gateway → API Service → Postgres soft-delete + Kafka(use
 
 Profile changes publish events to Kafka, which the Event Log service persists to MongoDB with titles like "Profile updated: alice@example.com changed name" or "Account deleted: user-uuid".
 
+## Resilience & Retry Strategy
+
+All inter-service calls use exponential backoff with jitter:
+
+```
+Frontend ─── 3 retries (500ms base) ──▶ Gateway ─── 2 retries (150ms base) ──▶ API Service
+                                                                                    │
+                                                                              Kafka Producer
+                                                                              3 retries (200ms base)
+                                                                                    │
+                                                                              Event Log Consumer
+                                                                              4 retries (300ms base) ──▶ MongoDB
+```
+
+- **Frontend**: Retries GET on 502/503/504; retries all methods on network errors (request never reached server).
+- **Gateway proxy**: Retries on connection refused (all methods) and 502/503/504 (idempotent only). Buffers request body for safe replay.
+- **Kafka Producer**: Retries on transient broker/network errors. Serialization errors fail immediately.
+- **Event Log**: Retries MongoDB writes; drops and logs after 4 attempts to avoid blocking the consumer.
+
 ## Request Lifecycle
 
 ```

@@ -196,6 +196,24 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 | `/trade/profile` | Yes | View/edit profile, delete account |
 | `/admin/*` | Yes (admin) | Config, health dashboard |
 
+## Resilience & Retry Strategy
+
+Every layer uses **exponential backoff with jitter** to avoid thundering-herd retries.
+
+| Layer | What's retried | Max retries | Base delay | Notes |
+|-------|---------------|:-----------:|:----------:|-------|
+| **Frontend (`apiFetch`)** | Network errors + 502/503/504 | 3 | 500 ms | GET/HEAD/OPTIONS retried on 5xx; mutations only on network errors (request never reached server) |
+| **API Gateway (reverse proxy)** | Connection refused + 502/503/504 | 2 | 150 ms | Network errors retried for all methods; HTTP 5xx only for idempotent methods |
+| **Kafka Producer** | Transient broker/network errors | 3 | 200 ms | Respects context cancellation; non-transient errors (serialization) fail immediately |
+| **Event Log → MongoDB** | All MongoDB write failures | 4 | 300 ms | Drops event after exhausting retries and logs a warning; commits Kafka offset to avoid reprocessing |
+
+### Design Decisions
+
+- **Idempotency guard**: POST/PUT/DELETE are *not* retried after a server response (even 5xx) to prevent duplicate side-effects. They *are* retried on network errors because the request never reached the upstream.
+- **Jitter**: Every backoff includes random jitter to avoid synchronized retry storms across clients.
+- **Fail-fast on auth**: 401 responses are never retried — the frontend immediately clears the token and redirects to login.
+- **Circuit breaking**: Not yet implemented. For a production deployment, wrap the gateway proxy and Kafka producer with a circuit breaker (e.g. `sony/gobreaker`) to avoid hammering a degraded upstream.
+
 ## Tradeoffs & Design Notes
 
 - **Gateway-first auth**: JWT validation happens once at the gateway edge. Downstream services trust injected headers, eliminating redundant crypto operations and keeping handler latency minimal.
