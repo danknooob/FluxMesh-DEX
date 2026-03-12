@@ -55,7 +55,7 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 | `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy ([SERVICE.md](gateway/SERVICE.md)) |
 | `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) |
 | `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) ([SERVICE.md](api/SERVICE.md)) |
-| `matching-engine/` | Order-book matching; consumes `orders.created` and `orders.cancelled`; emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
+| `matching-engine/` | Order-book matching; restores resting orders from Postgres on startup; consumes `orders.created` and `orders.cancelled`; emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
 | `indexer/` | Kafka → Postgres projector; updates order statuses, creates trade records, upserts balances ([SERVICE.md](indexer/SERVICE.md)) |
 | `settlement/` | Consumes `orders.matched`, batches and calls EVM `ExchangeCore.settleTrades` ([SERVICE.md](settlement/SERVICE.md)) |
 | `notification/` | WebSocket service; consumes domain + notification topics ([SERVICE.md](notification/SERVICE.md)) |
@@ -138,30 +138,37 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
    ```
    Listens on `:8080` (internal, behind gateway).
 
-4. **Indexer**
+4. **Matching Engine**
+   ```bash
+   cd matching-engine && go mod tidy && go run ./cmd/matching-engine
+   ```
+   Restores resting orders from Postgres on boot, then consumes `orders.created` / `orders.cancelled` from Kafka.
+   Requires `DB_DSN` env var (defaults to `postgres://dex:dex@localhost:5432/fluxmesh?sslmode=disable`).
+
+5. **Indexer**
    ```bash
    cd indexer && go mod tidy && go run ./cmd/indexer
    ```
    Projects Kafka events into Postgres (order statuses, trades, balances). Health on `:8082`.
 
-5. **Event Log**
+6. **Event Log**
    ```bash
    cd eventlog && go mod tidy && go run ./cmd/eventlog
    ```
    Consumes all Kafka topics and writes to MongoDB.
 
-6. **Frontend**
+7. **Frontend**
    ```bash
    cd frontend && npm install && npm run dev
    ```
    Vite dev server on `:3000`, proxies `/api` and `/control` to the gateway.
 
-7. **Control plane**
+8. **Control plane**
    ```bash
    cd mcp && go mod tidy && go run ./cmd/mcp
    ```
 
-8. **MCP server (Model Context Protocol — for AI assistants)**
+9. **MCP server (Model Context Protocol — for AI assistants)**
    ```bash
    cd mcp && go run ./cmd/fluxmesh-mcp
    ```
@@ -277,7 +284,36 @@ All database access goes through **PL/pgSQL stored functions** (`CREATE OR REPLA
 | `fn_register_user_atomic` | Email uniqueness check + insert (catches race via `EXCEPTION`) |
 | `fn_update_profile_atomic` | Row lock + email uniqueness + update |
 | `fn_upsert_balance` | `INSERT ... ON CONFLICT DO UPDATE` for balance projections |
+| `fn_get_resting_orders` | Returns all `pending`/`partial` orders for matching engine startup recovery |
 | 13 more | CRUD for orders, users, markets, balances, trades |
+
+## Matching Engine Persistence & Recovery
+
+The in-memory order book is **rebuilt from Postgres on every startup**, so a restart never loses resting orders.
+
+### Startup Sequence
+
+```
+1. Connect to Postgres
+2. Call fn_get_resting_orders()  →  all pending/partial orders, sorted by created_at
+3. For each order:  engine.RestoreOrder(...)  →  book.Add() (no matching attempted)
+4. Close DB connection (engine only uses Kafka at runtime)
+5. Begin consuming orders.created + orders.cancelled from Kafka
+```
+
+### Why DB Replay (Not Kafka Replay)?
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Postgres query** (chosen) | Single query, instant, source of truth, correct-by-construction | Requires DB access on startup |
+| Kafka offset reset | No DB dependency | Must replay entire topic history; filled/cancelled orders must be tracked and skipped; slow on large topics |
+| File snapshot | Fast, no external deps | Stale if engine crashed mid-write; two sources of truth |
+
+The Postgres approach is the simplest and most correct: the database already tracks which orders are still resting (`status IN ('pending','partial')`), so one query gives us exactly the set of orders that belong on the book.
+
+### Decimal Precision
+
+Prices and sizes throughout the matching engine and settlement service use `shopspring/decimal` (arbitrary-precision decimals) instead of `float64`, eliminating rounding errors on real trades.
 
 ## Resilience & Retry Strategy
 

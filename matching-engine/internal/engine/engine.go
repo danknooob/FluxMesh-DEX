@@ -198,6 +198,33 @@ func (e *Engine) ProcessCancelled(_ context.Context, evt OrdersCancelledEvent) {
 	log.Printf("engine: cancel order %s not found on any book (already filled or never rested)", evt.OrderID)
 }
 
+// RestoreOrder places a resting order back onto the in-memory book.
+// Called during startup recovery — does NOT attempt matching.
+func (e *Engine) RestoreOrder(id, userID, marketID, side, price, remaining string, createdAt time.Time) {
+	p, err := decimal.NewFromString(price)
+	if err != nil {
+		log.Printf("engine: restore skip order %s: bad price %q", id, price)
+		return
+	}
+	r, err := decimal.NewFromString(remaining)
+	if err != nil || r.LessThanOrEqual(decimal.Zero) {
+		log.Printf("engine: restore skip order %s: bad remaining %q", id, remaining)
+		return
+	}
+
+	book := e.getBook(marketID)
+	book.Add(&orderbook.Order{
+		ID:        id,
+		UserID:    userID,
+		MarketID:  marketID,
+		Side:      orderbook.Side(side),
+		Price:     p,
+		Size:      r,
+		Remaining: r,
+		CreatedAt: createdAt,
+	})
+}
+
 func (e *Engine) reject(ctx context.Context, evt OrdersCreatedEvent, reason string) error {
 	return e.prod.PublishOrdersRejected(ctx, map[string]interface{}{
 		"order_id":  evt.OrderID,

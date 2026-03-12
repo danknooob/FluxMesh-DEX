@@ -13,6 +13,8 @@ import (
 
 	"github.com/danknooob/fluxmesh-dex/matching-engine/internal/engine"
 	"github.com/segmentio/kafka-go"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -23,12 +25,16 @@ func main() {
 			brokers = parts
 		}
 	}
+	dsn := getEnv("DB_DSN", "postgres://dex:dex@localhost:5432/fluxmesh?sslmode=disable")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	prod := engine.NewKafkaProducer(brokers, "orders.matched", "orders.rejected")
 	eng := engine.NewEngine(prod)
+
+	// --- Restore resting orders from Postgres ---
+	restoreFromDB(eng, dsn)
 
 	createdReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  brokers,
@@ -65,6 +71,40 @@ func main() {
 	log.Println("matching-engine: consuming orders.created + orders.cancelled")
 	wg.Wait()
 	log.Println("matching-engine: shutdown complete")
+}
+
+type restingOrder struct {
+	ID        string    `gorm:"column:id"`
+	UserID    string    `gorm:"column:user_id"`
+	MarketID  string    `gorm:"column:market_id"`
+	Side      string    `gorm:"column:side"`
+	Price     string    `gorm:"column:price"`
+	Remaining string    `gorm:"column:remaining"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+func restoreFromDB(eng *engine.Engine, dsn string) {
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Printf("matching-engine: db connect failed, starting with empty books: %v", err)
+		return
+	}
+
+	var orders []restingOrder
+	if err := db.Raw("SELECT * FROM fn_get_resting_orders()").Scan(&orders).Error; err != nil {
+		log.Printf("matching-engine: restore query failed, starting with empty books: %v", err)
+		return
+	}
+
+	for _, o := range orders {
+		eng.RestoreOrder(o.ID, o.UserID, o.MarketID, o.Side, o.Price, o.Remaining, o.CreatedAt)
+	}
+	log.Printf("matching-engine: restored %d resting orders from Postgres", len(orders))
+
+	sqlDB, _ := db.DB()
+	if sqlDB != nil {
+		sqlDB.Close()
+	}
 }
 
 func consumeCreated(ctx context.Context, r *kafka.Reader, eng *engine.Engine) {
@@ -123,4 +163,11 @@ func consumeCancelled(ctx context.Context, r *kafka.Reader, eng *engine.Engine) 
 			log.Printf("matching-engine: commit error (cancelled): %v", err)
 		}
 	}
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

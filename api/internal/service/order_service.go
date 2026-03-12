@@ -102,10 +102,11 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID uuid.UUID, userI
 	}
 
 	if err := s.producer.PublishOrderCancelled(ctx, map[string]interface{}{
-		"order_id":  orderID.String(),
-		"user_id":   userID,
-		"market_id": order.MarketID,
-		"remaining": order.Remaining,
+		"order_id":   orderID.String(),
+		"user_id":    userID,
+		"market_id":  order.MarketID,
+		"remaining":  order.Remaining,
+		"cancel_fee": order.CancelFee,
 	}); err != nil {
 		log.Printf("publish orders.cancelled failed: %v", err)
 	}

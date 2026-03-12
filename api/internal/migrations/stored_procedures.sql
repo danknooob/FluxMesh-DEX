@@ -141,7 +141,7 @@ BEGIN
 END;
 $$;
 
--- Guarded cancel — enforces cancellation rules:
+-- Guarded cancel — enforces cancellation rules and computes fee:
 --
 --   Status      | Cancellable? | Reason
 --   ------------|-------------|-----------------------------------
@@ -152,13 +152,22 @@ $$;
 --   cancelled   | NO          | Already cancelled
 --   market type | NO          | Executes instantly at market price
 --
+-- Fee = remaining × price × market.cancel_fee_rate
+-- Fee is capped at the user's available balance (never goes negative).
+-- Fee asset: quote asset for buy orders, base asset for sell orders.
 -- Raises ORDER_NOT_FOUND or ORDER_NOT_CANCELLABLE on failure.
 -- Returns the updated order row on success.
 CREATE OR REPLACE FUNCTION fn_cancel_order(p_id TEXT, p_user_id TEXT)
 RETURNS SETOF orders
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_order orders%ROWTYPE;
+    v_order     orders%ROWTYPE;
+    v_fee_rate  NUMERIC;
+    v_base      TEXT;
+    v_quote     TEXT;
+    v_fee       NUMERIC;
+    v_fee_asset TEXT;
+    v_available NUMERIC;
 BEGIN
     SELECT * INTO v_order
     FROM orders
@@ -179,8 +188,44 @@ BEGIN
         RAISE EXCEPTION 'ORDER_NOT_CANCELLABLE:order is already %', v_order.status;
     END IF;
 
+    -- Look up market fee configuration
+    SELECT COALESCE(m.cancel_fee_rate, 0), m.base_asset, m.quote_asset
+    INTO v_fee_rate, v_base, v_quote
+    FROM markets m
+    WHERE m.id = v_order.market_id AND m.deleted_at IS NULL;
+
+    IF v_order.side = 'buy' THEN
+        v_fee_asset := v_quote;
+    ELSE
+        v_fee_asset := v_base;
+    END IF;
+
+    v_fee := v_order.remaining * v_order.price * v_fee_rate;
+
+    SELECT COALESCE(b.available, 0)::NUMERIC INTO v_available
+    FROM balances b
+    WHERE b.user_id = p_user_id AND b.asset = v_fee_asset;
+
+    IF v_available IS NULL THEN
+        v_available := 0;
+    END IF;
+
+    IF v_fee > v_available THEN
+        v_fee := v_available;
+    END IF;
+
+    -- Deduct fee from balance
+    IF v_fee > 0 THEN
+        UPDATE balances
+        SET available  = (available::NUMERIC - v_fee)::TEXT,
+            updated_at = NOW()
+        WHERE user_id = p_user_id AND asset = v_fee_asset;
+    END IF;
+
+    -- Cancel the order and record the fee
     UPDATE orders
     SET status     = 'cancelled',
+        cancel_fee = v_fee,
         updated_at = NOW()
     WHERE id = p_id::UUID;
 
@@ -208,6 +253,29 @@ BEGIN
             updated_at = NOW()
         WHERE id = p_order_id::UUID;
     END IF;
+END;
+$$;
+
+-- Used by the matching engine on startup to restore resting orders
+-- into the in-memory order book after a restart.
+CREATE OR REPLACE FUNCTION fn_get_resting_orders()
+RETURNS TABLE(
+    id         UUID,
+    user_id    TEXT,
+    market_id  TEXT,
+    side       TEXT,
+    price      NUMERIC,
+    remaining  NUMERIC,
+    created_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+    RETURN QUERY
+    SELECT o.id, o.user_id, o.market_id, o.side, o.price, o.remaining, o.created_at
+    FROM orders o
+    WHERE o.status IN ('pending', 'partial')
+      AND o.deleted_at IS NULL
+    ORDER BY o.created_at ASC;
 END;
 $$;
 
