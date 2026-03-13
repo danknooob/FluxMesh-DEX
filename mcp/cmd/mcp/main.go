@@ -6,11 +6,24 @@ import (
 
 	"github.com/danknooob/fluxmesh-dex/mcp/internal/config"
 	"github.com/danknooob/fluxmesh-dex/mcp/internal/handler"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func main() {
 	cfg := config.Load()
-	admin := &handler.AdminHandler{}
+
+	var db *gorm.DB
+	if cfg.DB != "" {
+		if d, err := gorm.Open(postgres.Open(cfg.DB), &gorm.Config{}); err == nil {
+			db = d
+			log.Println("control-plane: connected to Postgres for config")
+		} else {
+			log.Printf("control-plane: failed to connect Postgres (config will be empty): %v", err)
+		}
+	}
+
+	admin := &handler.AdminHandler{DB: db}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin/config", func(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +36,13 @@ func main() {
 	mux.HandleFunc("/admin/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			admin.Health(w, r)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+	mux.HandleFunc("/admin/markets", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			admin.Markets(w, r)
 			return
 		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
