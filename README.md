@@ -440,6 +440,16 @@ To send traces to a collector, set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://l
 - **Images** are published to `ghcr.io/<owner>/fluxmesh-<service>`. Each service has a `Dockerfile` in its directory (multi-stage Go build or Node + nginx for frontend).
 - **Linting**: Go projects use [golangci-lint](https://golangci-lint.run/); add a `.golangci.yml` in any service to customize. Frontend uses `npm run lint` (ESLint).
 
+### Go version (auto latest in CI/Docker)
+
+**CI and Docker** use the **latest stable Go** from the internet ([go.dev/dl/?mode=json](https://go.dev/dl/?mode=json)). On network failure they fall back to **`.go-version`** (updated by the **Update Go version** workflow) so the last known latest is always used.
+
+- Each run calls go.dev, takes the first (latest) release, and strips the `go` prefix (e.g. `go1.26.1` → `1.26.1`).
+- If the fetch fails (network problem), the workflow falls back to **`.go-version`** in the repo, then to `1.25`. The **Update Go version** workflow is fully automated: it runs **weekly** (Sunday 00:00 UTC via `schedule`) and on every push to `main`/`master`, and commits an updated `.go-version` when the latest changes, so the fallback is always the last known latest.
+- **go.mod** keeps a minimum required version (e.g. `go 1.25`); the Go used in CI/Docker is backward compatible.
+
+Locally, with the default `GOTOOLCHAIN=auto`, `go build` will use or download the version required by `go.mod`. To upgrade the minimum version across services, edit `.go-version` and run `./scripts/sync-go-version.sh`, then commit the updated `go.mod` files.
+
 ## Interactive API Docs (Swagger)
 
 The gateway serves a **Swagger UI** at `http://localhost:8000/docs` — interactive documentation for every endpoint (auth, profile, orders, markets, balances, admin). The OpenAPI spec is at `docs/swagger.yaml`.

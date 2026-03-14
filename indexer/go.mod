@@ -1,6 +1,6 @@
 module github.com/danknooob/fluxmesh-dex/indexer
 
-go 1.22
+go 1.25
 
 require (
 	github.com/segmentio/kafka-go v0.4.47

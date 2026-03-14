@@ -1,0 +1,57 @@
+# Fetches the latest stable Go version from go.dev and updates .go-version in the repo.
+# CI/Docker use this file as fallback when the API is unreachable, so "last latest" is always in the repo.
+name: Update Go version
+
+on:
+  schedule:
+    # Run weekly (Sunday 00:00 UTC)
+    - cron: '0 0 * * 0'
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Fetch latest Go and update .go-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest Go version from go.dev
+        id: fetch
+        run: |
+          V=$(curl -sL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//')
+          if [ -z "$V" ]; then
+            echo "::error::Failed to fetch latest Go version"
+            exit 1
+          fi
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "Latest stable Go: $V"
+
+      - name: Update .go-version if changed
+        run: |
+          NEW=${{ steps.fetch.outputs.version }}
+          OLD=$(cat .go-version 2>/dev/null | tr -d '[:space:]' || echo "")
+          if [ "$NEW" != "$OLD" ]; then
+            echo "$NEW" > .go-version
+            echo "Updated .go-version: $OLD -> $NEW"
+          else
+            echo ".go-version already up to date: $NEW"
+          fi
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .go-version
+          if git diff --staged --quiet; then
+            echo "No change to commit"
+          else
+            git commit -m "chore: update .go-version to ${{ steps.fetch.outputs.version }} (latest from go.dev)"
+            git push
+          fi

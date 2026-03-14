@@ -41,6 +41,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Get latest Go version
+        id: go_version
+        run: |
+          # 1) Fetch latest from go.dev; 2) fallback to .go-version (updated by update-go-version workflow); 3) fallback to 1.25
+          V=$(curl -sL 'https://go.dev/dl/?mode=json' | jq -r '.[0].version' | sed 's/^go//')
+          if [ -z "$V" ]; then
+            V=$(cat .go-version 2>/dev/null | tr -d '[:space:]')
+            [ -z "$V" ] && V="1.25"
+            echo "Network fallback: using .go-version or default -> $V"
+          else
+            echo "Using latest from go.dev: $V"
+          fi
+          echo "version=$V" >> $GITHUB_OUTPUT
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -71,5 +85,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GO_VERSION=${{ steps.go_version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
