@@ -53,7 +53,7 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 | Path | Description |
 |------|-------------|
 | `gateway/` | API Gateway — JWT validation, per-user token-bucket rate limiting, reverse proxy ([SERVICE.md](gateway/SERVICE.md)) |
-| `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) |
+| `contracts/` | EVM smart contracts (ExchangeCore, MarketRegistry) with access control + per-trade idempotent settlement guards |
 | `api/` | Go MVC HTTP service (auth, profile, orders, markets, balances, Kafka producer) ([SERVICE.md](api/SERVICE.md)) |
 | `matching-engine/` | Order-book matching; restores resting orders from Postgres on startup; consumes `orders.created` and `orders.cancelled`; emits `orders.matched` / `orders.rejected` ([SERVICE.md](matching-engine/SERVICE.md)) |
 | `indexer/` | Kafka → Postgres projector; updates order statuses, creates trade records, upserts balances ([SERVICE.md](indexer/SERVICE.md)) |
@@ -118,6 +118,15 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
 | `control.audit` | Control plane | Event log | Immutable audit log |
 | `control.commands` | Control plane | Data-plane services, Event log | Pause market, safe mode, etc. |
 
+## WebSocket Notifications
+
+The `notification/` service exposes a JWT-authenticated WebSocket endpoint used by the frontend to stream real-time events (fills, cancels, balance updates) per user.
+
+- **Endpoint**: `ws://localhost:8090/ws?token=<jwt>`
+- **Auth**: The token is the same JWT issued by the API; it is validated server-side using `JWT_SECRET` and the `sub` claim becomes the user id.
+- **Topics bridged**: `notifications.user`, `orders.matched`, `orders.cancelled`, `balances.updated` → pushed to the correct user via an in-memory hub.
+- **Frontend**: `useWebSocket` hook maintains an auto-reconnecting connection; `NotificationProvider` shows small toasts and triggers live refresh of the Order Book (depth + open orders) and Balances pages.
+
 ## Quick Start
 
 1. **Infrastructure**
@@ -172,6 +181,12 @@ The `eventlog/` service is a dedicated Kafka consumer that persists **every even
    ```bash
    cd mcp && go run ./cmd/fluxmesh-mcp
    ```
+
+10. **Notification WebSocket**
+    ```bash
+    cd notification && go mod tidy && go run ./cmd/notification
+    ```
+    Exposes `ws://localhost:8090/ws?token=<jwt>` for real-time user notifications.
 
 ## Authentication Flow
 
@@ -354,6 +369,15 @@ This means the same order submission can be safely retried any number of times a
 - **Event-driven vs synchronous**: Orders are accepted via API and processed asynchronously via Kafka; clients get real-time updates via WebSocket.
 - **Why Kafka**: Durable, ordered event log; replay and multiple consumers; aligns with control plane broadcasting.
 - **MCP (Model Context Protocol)**: Lets AI tools interact with the DEX without custom integrations.
+
+### Solidity & EVM Integration
+
+- `contracts/ExchangeCore.sol` implements the on-chain settlement core:
+  - Maintains per-trade idempotency via `tradeSettled[tradeId]` so off-chain retries are safe.
+  - Uses a simple `owner` / `settler` access model plus a non-reentrant `settleTrades` entrypoint.
+- `contracts/MarketRegistry.sol` holds market parameters on-chain behind an `owner` gate for config changes.
+- The Go `settlement/` service is wired to consume `orders.matched` and emit `trades.settled` / `balances.updated`; connecting it to a live Ethereum RPC + deployed `ExchangeCore` is optional and controlled via environment variables (`ETH_RPC_URL`, `EXCHANGE_CORE_ADDRESS`, `SETTLEMENT_PRIVATE_KEY`, `CHAIN_ID`).
+- You do **not** need solc/Hardhat/Foundry installed just to run the backend; Solidity tooling is only required if you want to compile/deploy the contracts yourself.
 
 ## Interactive API Docs (Swagger)
 
