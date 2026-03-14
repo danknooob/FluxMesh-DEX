@@ -9,8 +9,3 @@ linters:
     - govet
     - staticcheck
     - ineffassign
-
-formatters:
-  enable:
-    - gofmt
-    - goimports
