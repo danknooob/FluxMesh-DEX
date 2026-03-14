@@ -59,7 +59,7 @@ func main() {
 	dbseed.SeedDefaultUsers(db)
 
 	producer := kafka.NewProducer(cfg.Kafka.Brokers)
-	defer producer.Close()
+	defer func() { _ = producer.Close() }()
 
 	userRepo := repository.NewUserRepository(db)
 	orderRepo := repository.NewOrderRepository(db)

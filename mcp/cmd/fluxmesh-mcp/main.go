@@ -112,7 +112,7 @@ func httpGetJSON(ctx context.Context, client *http.Client, url string) (string, 
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var anyJSON interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&anyJSON); err != nil {

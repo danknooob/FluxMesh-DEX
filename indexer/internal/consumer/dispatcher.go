@@ -48,7 +48,7 @@ func (d *Dispatcher) Run(ctx context.Context) {
 
 	<-ctx.Done()
 	for _, r := range readers {
-		r.Close()
+		_ = r.Close()
 	}
 }
 

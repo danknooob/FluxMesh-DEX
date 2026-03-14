@@ -36,7 +36,7 @@ func main() {
 		MinBytes: 1,
 		MaxBytes: 10e6,
 	})
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	log.Println("settlement: consuming from topic orders.matched")
 

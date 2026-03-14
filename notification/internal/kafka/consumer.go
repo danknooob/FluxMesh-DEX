@@ -35,7 +35,7 @@ func NewNotificationConsumer(brokers []string, topic string, h *hub.Hub) *Notifi
 // It expects each payload to include a user_id field, either at the top level
 // or inside a "user_id" key, and forwards the raw JSON to that user's clients.
 func (c *NotificationConsumer) Run(ctx context.Context) {
-	defer c.reader.Close()
+	defer func() { _ = c.reader.Close() }()
 
 	for {
 		m, err := c.reader.FetchMessage(ctx)

@@ -34,7 +34,7 @@ func NewTypedConsumer(brokers []string, topic, eventType string, h *hub.Hub) *Ty
 }
 
 func (c *TypedConsumer) Run(ctx context.Context) {
-	defer c.reader.Close()
+	defer func() { _ = c.reader.Close() }()
 
 	for {
 		m, err := c.reader.FetchMessage(ctx)
@@ -91,7 +91,7 @@ func NewMatchedConsumer(brokers []string, h *hub.Hub) *MatchedConsumer {
 }
 
 func (c *MatchedConsumer) Run(ctx context.Context) {
-	defer c.reader.Close()
+	defer func() { _ = c.reader.Close() }()
 
 	for {
 		m, err := c.reader.FetchMessage(ctx)

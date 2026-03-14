@@ -64,7 +64,7 @@ func WSHandler(h *hub.Hub, jwtSecret []byte) http.HandlerFunc {
 		go func() {
 			defer func() {
 				h.Unregister(client)
-				conn.Close()
+				_ = conn.Close()
 			}()
 			for msg := range client.Send {
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {

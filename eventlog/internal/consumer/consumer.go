@@ -46,7 +46,7 @@ func (tc *TopicConsumer) Run(ctx context.Context) {
 	}
 	<-ctx.Done()
 	for _, r := range tc.readers {
-		r.Close()
+		_ = r.Close()
 	}
 }
 

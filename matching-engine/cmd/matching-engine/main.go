@@ -43,7 +43,7 @@ func main() {
 		MinBytes: 1,
 		MaxBytes: 10e6,
 	})
-	defer createdReader.Close()
+	defer func() { _ = createdReader.Close() }()
 
 	cancelledReader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  brokers,
@@ -103,7 +103,7 @@ func restoreFromDB(eng *engine.Engine, dsn string) {
 
 	sqlDB, _ := db.DB()
 	if sqlDB != nil {
-		sqlDB.Close()
+		_ = sqlDB.Close()
 	}
 }
 
