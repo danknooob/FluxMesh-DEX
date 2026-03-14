@@ -18,7 +18,7 @@ func New(specPath string) *Handler {
 // UI serves an HTML page that loads Swagger UI from CDN pointing to the local spec.
 func (h *Handler) UI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(swaggerHTML))
+	_, _ = w.Write([]byte(swaggerHTML))
 }
 
 // Spec serves the raw OpenAPI YAML file.
@@ -35,7 +35,7 @@ func (h *Handler) Spec(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 const swaggerHTML = `<!DOCTYPE html>
