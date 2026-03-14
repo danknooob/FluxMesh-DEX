@@ -36,6 +36,8 @@ jobs:
           go-version: ${{ steps.go.outputs.version }}
 
       - name: Download deps
+        env:
+          GOWORK: off
         run: go mod download
         working-directory: ${{ matrix.service }}
 
@@ -45,7 +47,10 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Build and lint
+        env:
+          GOWORK: off
         run: |
+          go mod download
           go build -o /dev/null ./...
           golangci-lint run ./...
         working-directory: ${{ matrix.service }}
