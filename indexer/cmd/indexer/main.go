@@ -63,7 +63,7 @@ func main() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})
 		log.Printf("indexer: health endpoint on :%s/health", port)
 		if err := http.ListenAndServe(":"+port, mux); err != nil && err != http.ErrServerClosed {
