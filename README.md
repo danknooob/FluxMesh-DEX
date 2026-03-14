@@ -391,6 +391,16 @@ This means the same order submission can be safely retried any number of times a
 - **API integration tests** hit the real HTTP router (with test DB and Kafka); they check login, register, markets list, depth, auth-required create order, and create order success.
 - **E2E** runs a single flow through the API to assert the full order lifecycle with a real DB.
 
+## CI/CD (GitHub Actions)
+
+| Workflow | Trigger | Jobs |
+|----------|---------|------|
+| **CI** (`.github/workflows/ci.yml`) | Push / PR to `main` or `master` | Lint Go (golangci-lint per service), Test Go (`go test ./...` per service), Lint Frontend (`npm run lint`), Build Frontend (`npm run build`) |
+| **Docker** (`.github/workflows/docker.yml`) | Push to `main`/`master`, or release published | Build and push images to GitHub Container Registry (GHCR) for `api`, `gateway`, `matching-engine`, `indexer`, `settlement`, `notification`, `eventlog`, `mcp`, `frontend` |
+
+- **Images** are published to `ghcr.io/<owner>/fluxmesh-<service>`. Each service has a `Dockerfile` in its directory (multi-stage Go build or Node + nginx for frontend).
+- **Linting**: Go projects use [golangci-lint](https://golangci-lint.run/); add a `.golangci.yml` in any service to customize. Frontend uses `npm run lint` (ESLint).
+
 ## Interactive API Docs (Swagger)
 
 The gateway serves a **Swagger UI** at `http://localhost:8000/docs` — interactive documentation for every endpoint (auth, profile, orders, markets, balances, admin). The OpenAPI spec is at `docs/swagger.yaml`.
