@@ -38,8 +38,9 @@ jobs:
       - name: Download deps
         env:
           GOWORK: off
-        run: go mod download
-        working-directory: ${{ matrix.service }}
+        run: |
+          cd "${{ matrix.service }}"
+          go mod download
 
       - name: Install golangci-lint
         run: |
@@ -50,10 +51,10 @@ jobs:
         env:
           GOWORK: off
         run: |
+          cd "${{ matrix.service }}"
           go mod download
           go build -o /dev/null ./...
           golangci-lint run ./...
-        working-directory: ${{ matrix.service }}
 
   test-go:
     name: Test Go (${{ matrix.service }})
