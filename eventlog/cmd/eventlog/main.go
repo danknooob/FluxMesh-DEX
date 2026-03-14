@@ -47,7 +47,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("eventlog: mongo connection failed: %v", err)
 	}
-	defer es.Close(ctx)
+	defer func() { _ = es.Close(ctx) }()
 
 	log.Printf("eventlog: connected to MongoDB (%s/%s)", mongoURI, mongoDB)
 	log.Printf("eventlog: subscribing to %d topics: %v", len(topics), topics)
