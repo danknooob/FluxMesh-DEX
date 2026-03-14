@@ -50,9 +50,9 @@ func NewMongoStore(ctx context.Context, uri, database string) (EventStore, error
 	coll := client.Database(database).Collection("events")
 
 	indexModels := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "topic", Value: 1}, {Key: "timestamp", Value: -1}}},
-		{Keys: bson.D{{Key: "title", Value: 1}}},
-		{Keys: bson.D{{Key: "stored_at", Value: 1}}},
+		{Keys: bson.D{bson.E{Key: "topic", Value: 1}, bson.E{Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{bson.E{Key: "title", Value: 1}}},
+		{Keys: bson.D{bson.E{Key: "stored_at", Value: 1}}},
 	}
 	coll.Indexes().CreateMany(ctx, indexModels)
 
