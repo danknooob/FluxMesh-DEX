@@ -1,4 +1,6 @@
 # Local config so golangci-lint uses this dir as base (fixes typecheck resolving deps from this go.mod)
+version: 2
+
 run:
   timeout: 5m
   modules-download-mode: readonly

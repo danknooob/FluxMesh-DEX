@@ -1,4 +1,6 @@
 # Shared config for all Go services. Run from each service dir (api, gateway, mcp, etc.)
+version: 2
+
 run:
   timeout: 5m
   modules-download-mode: readonly
