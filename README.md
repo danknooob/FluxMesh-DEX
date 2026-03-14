@@ -379,6 +379,18 @@ This means the same order submission can be safely retried any number of times a
 - The Go `settlement/` service is wired to consume `orders.matched` and emit `trades.settled` / `balances.updated`; connecting it to a live Ethereum RPC + deployed `ExchangeCore` is optional and controlled via environment variables (`ETH_RPC_URL`, `EXCHANGE_CORE_ADDRESS`, `SETTLEMENT_PRIVATE_KEY`, `CHAIN_ID`).
 - You do **not** need solc/Hardhat/Foundry installed just to run the backend; Solidity tooling is only required if you want to compile/deploy the contracts yourself.
 
+## Testing
+
+| Layer | Location | How to run |
+|-------|----------|------------|
+| **Unit (matching engine)** | `matching-engine/internal/orderbook/book_test.go`, `matching-engine/internal/engine/engine_test.go` | `cd matching-engine && go test ./...` |
+| **Integration (API)** | `api/cmd/api/integration_test.go` | Requires Postgres + Kafka. `cd api && go test -tags=integration ./cmd/api/...` (skips if DB unreachable) |
+| **E2E (order lifecycle)** | Same file as integration | `go test -tags=integration ./cmd/api/... -run TestE2E_OrderLifecycle` — register → login → create order → list → cancel |
+
+- **Matching engine unit tests** cover the order book: add/cancel, match incoming (buy/sell, no fill, full fill, partial fill, two makers), and the engine (reject invalid side/price/size, rest on book, one fill, cancel, restore).
+- **API integration tests** hit the real HTTP router (with test DB and Kafka); they check login, register, markets list, depth, auth-required create order, and create order success.
+- **E2E** runs a single flow through the API to assert the full order lifecycle with a real DB.
+
 ## Interactive API Docs (Swagger)
 
 The gateway serves a **Swagger UI** at `http://localhost:8000/docs` — interactive documentation for every endpoint (auth, profile, orders, markets, balances, admin). The OpenAPI spec is at `docs/swagger.yaml`.
