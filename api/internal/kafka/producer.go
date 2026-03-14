@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/sony/gobreaker"
 )
 
 const (
@@ -24,12 +25,20 @@ const (
 	maxDelay     = 5 * time.Second
 )
 
-// Producer publishes events to Kafka with automatic retry on transient errors.
+// Circuit breaker: open after 5 consecutive failures, try again after 30s.
+const (
+	cbTimeout     = 30 * time.Second
+	cbReadyToTrip = 5
+)
+
+// Producer publishes events to Kafka with automatic retry on transient errors
+// and a circuit breaker so sustained broker failures fail fast instead of hammering Kafka.
 type Producer struct {
 	createdWriter   *kafka.Writer
 	cancelledWriter *kafka.Writer
 	userUpdWriter   *kafka.Writer
 	userDelWriter   *kafka.Writer
+	cb              *gobreaker.CircuitBreaker
 }
 
 func NewProducer(brokers []string) *Producer {
@@ -37,11 +46,26 @@ func NewProducer(brokers []string) *Producer {
 	w := func(topic string) *kafka.Writer {
 		return &kafka.Writer{Addr: addr, Topic: topic, Balancer: &kafka.LeastBytes{}}
 	}
+	cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:    "kafka-producer",
+		Timeout: cbTimeout,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			return counts.ConsecutiveFailures >= cbReadyToTrip
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			log.Printf("kafka-producer: circuit breaker %s %v -> %v", name, from, to)
+		},
+		// Don't count context cancellation as failure so client timeouts don't open the circuit.
+		IsSuccessful: func(err error) bool {
+			return err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+		},
+	})
 	return &Producer{
 		createdWriter:   w(TopicOrdersCreated),
 		cancelledWriter: w(TopicOrdersCancelled),
 		userUpdWriter:   w(TopicUsersUpdated),
 		userDelWriter:   w(TopicUsersDeleted),
+		cb:              cb,
 	}
 }
 
@@ -69,24 +93,30 @@ func (p *Producer) writeJSON(ctx context.Context, w *kafka.Writer, payload inter
 	msg := kafka.Message{Value: body}
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		err = w.WriteMessages(ctx, msg)
-		if err == nil {
-			return nil
+		_, err = p.cb.Execute(func() (interface{}, error) {
+			return nil, w.WriteMessages(ctx, msg)
+		})
+		if err != nil {
+			if errors.Is(err, gobreaker.ErrOpenState) {
+				return err
+			}
+			if !isTransient(err) {
+				return err
+			}
+			if attempt == maxRetries {
+				break
+			}
+			delay := backoff(attempt)
+			log.Printf("kafka-producer: transient error on %s (attempt %d/%d), retrying in %v: %v",
+				w.Topic, attempt+1, maxRetries, delay, err)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
 		}
-		if !isTransient(err) {
-			return err
-		}
-		if attempt == maxRetries {
-			break
-		}
-		delay := backoff(attempt)
-		log.Printf("kafka-producer: transient error on %s (attempt %d/%d), retrying in %v: %v",
-			w.Topic, attempt+1, maxRetries, delay, err)
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return nil
 	}
 	return err
 }

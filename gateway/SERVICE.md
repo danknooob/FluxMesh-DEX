@@ -75,8 +75,10 @@ JWTAuth               custom — validates Bearer token, injects headers
 RateLimiter           custom — per-client token bucket
   │                      └── 429 + Retry-After: 1 if exhausted
   ▼
-Reverse Proxy         httputil.ReverseProxy with retry transport
+Reverse Proxy         httputil.ReverseProxy with retry transport + circuit breaker
 ```
+
+The proxy transport is wrapped with [sony/gobreaker](https://github.com/sony/gobreaker). After **5 consecutive upstream failures** (network or 5xx), the circuit opens and the gateway **fails fast** (returns error immediately without calling the backend) for that target. After **30 seconds** the circuit moves to half-open and one probe request is allowed; success closes the circuit, failure reopens it. This prevents sustained upstream outages from hammering the API or control service.
 
 ### JWT Auth Details
 
@@ -99,9 +101,11 @@ Reverse Proxy         httputil.ReverseProxy with retry transport
 
 Limiters are created lazily on first request and stored in a `sync.Mutex`-guarded map.
 
-## Retry Strategy
+## Retry Strategy & Circuit Breaker
 
-The reverse proxy wraps `http.DefaultTransport` in a custom `retryTransport`.
+The reverse proxy wraps `http.DefaultTransport` in a custom `retryTransport`, which is then wrapped in a **circuit breaker** (sony/gobreaker).
+
+**Retry (inside closed circuit):**
 
 | Property | Value |
 |----------|-------|
@@ -114,6 +118,16 @@ The reverse proxy wraps `http.DefaultTransport` in a custom `retryTransport`.
 | Non-idempotent + HTTP error | **Not** retried (request may have reached upstream) |
 
 Request bodies are buffered into memory before the first attempt so they can be replayed on retry.
+
+**Circuit breaker (per upstream):**
+
+| Property | Value |
+|----------|-------|
+| Open condition | 5 consecutive failures (any error from RoundTrip) |
+| Open duration | 30 s, then transition to half-open |
+| Half-open | 1 probe request allowed; success → closed, failure → open again |
+| When open | No upstream calls; RoundTrip returns error immediately (gateway responds with 502) |
+| Logging | State changes (closed → open, open → half-open, etc.) are logged |
 
 ## Configuration
 

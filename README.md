@@ -341,6 +341,17 @@ Every layer uses **exponential backoff with jitter** to avoid thundering-herd re
 | **Kafka Producer** | Transient broker/network errors | 3 | 200 ms | Respects context cancellation; non-transient errors (serialization) fail immediately |
 | **Event Log → MongoDB** | All MongoDB write failures | 4 | 300 ms | Drops event after exhausting retries and logs a warning; commits Kafka offset to avoid reprocessing |
 
+### Circuit Breakers (sony/gobreaker)
+
+Sustained upstream failures are handled by circuit breakers so the system stops hammering a degraded dependency.
+
+| Location | Trigger | Open behaviour | Recovery |
+|----------|---------|----------------|----------|
+| **Gateway → API / Control** | 5 consecutive RoundTrip failures (network or 5xx) per upstream | Proxy returns error immediately (client sees 502); no requests sent to that backend | After 30 s, circuit goes half-open; one request is allowed; success → closed, failure → open again |
+| **API Kafka producer** | 5 consecutive `WriteMessages` failures | Publish methods return `ErrOpenState` immediately; no retries to Kafka | Same: 30 s then half-open probe. Context cancellation is not counted as failure |
+
+State changes (closed → open, open → half-open) are logged so operators can see when circuits trip and recover.
+
 ### Idempotency Keys (Duplicate Order Prevention)
 
 Even with safe retry logic, a network drop *after* the server accepts the order but *before* the response reaches the client would cause a retry that creates a duplicate. To handle this:
@@ -358,7 +369,7 @@ This means the same order submission can be safely retried any number of times a
 - **Idempotency guard**: POST/PUT/DELETE are *not* retried after a server response (even 5xx) to prevent duplicate side-effects. They *are* retried on network errors because the request never reached the upstream. Additionally, `POST /orders` uses an `Idempotency-Key` header so even retried network-error requests produce at most one order.
 - **Jitter**: Every backoff includes random jitter to avoid synchronized retry storms across clients.
 - **Fail-fast on auth**: 401 responses are never retried — the frontend immediately clears the token and redirects to login.
-- **Circuit breaking**: Not yet implemented. For a production deployment, wrap the gateway proxy and Kafka producer with a circuit breaker (e.g. `sony/gobreaker`) to avoid hammering a degraded upstream.
+- **Circuit breakers**: The gateway proxy and the API’s Kafka producer are wrapped with [sony/gobreaker](https://github.com/sony/gobreaker). After 5 consecutive upstream failures, the circuit opens and requests fail fast (no retries to the failing service) until a 30s timeout, then one probe is allowed; success closes the circuit.
 
 ## Tradeoffs & Design Notes
 

@@ -7,3 +7,5 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	golang.org/x/time v0.9.0
 )
+
+require github.com/sony/gobreaker v1.0.0 // indirect

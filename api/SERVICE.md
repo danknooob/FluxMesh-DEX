@@ -42,7 +42,7 @@ api/
 │   │   ├── order_service.go         # Create/cancel/list orders, Kafka publish
 │   │   └── market_service.go        # List/get markets (thin wrapper over repo)
 │   ├── kafka/
-│   │   └── producer.go              # Kafka writer with exponential-backoff retry
+│   │   └── producer.go              # Kafka writer with retry + circuit breaker (gobreaker)
 │   └── dbseed/
 │       ├── markets.go               # Seeds default markets (BTC, ETH, SOL, ARB, OP)
 │       └── users.go                 # Seeds default dev users (admin + trader)
@@ -148,7 +148,7 @@ api/
 | `users.updated` | `PUT /profile` | `user_id`, `action`, `timestamp`, changed fields (`name`, `old_email`/`new_email`, `avatar_url`) |
 | `users.deleted` | `DELETE /profile` | `user_id`, `email`, `action`, `timestamp` |
 
-The producer uses exponential backoff with jitter (base 200ms, max 5s, 3 retries) for transient Kafka errors.
+The producer uses exponential backoff with jitter (base 200ms, max 5s, 3 retries) for transient Kafka errors. It is wrapped with [sony/gobreaker](https://github.com/sony/gobreaker): after 5 consecutive publish failures the circuit opens and publish calls return immediately with `ErrOpenState`; after 30s one probe is allowed. Context cancellation is not counted as a failure so client timeouts do not open the circuit.
 
 ## Configuration
 
