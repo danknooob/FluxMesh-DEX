@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/auth"
@@ -9,32 +10,51 @@ import (
 	"github.com/danknooob/fluxmesh-dex/api/internal/dbseed"
 	"github.com/danknooob/fluxmesh-dex/api/internal/handler"
 	"github.com/danknooob/fluxmesh-dex/api/internal/kafka"
+	"github.com/danknooob/fluxmesh-dex/api/internal/logger"
+	"github.com/danknooob/fluxmesh-dex/api/internal/metrics"
+	"github.com/danknooob/fluxmesh-dex/api/internal/middleware"
 	"github.com/danknooob/fluxmesh-dex/api/internal/migrations"
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
 	"github.com/danknooob/fluxmesh-dex/api/internal/repository"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
+	"github.com/danknooob/fluxmesh-dex/api/internal/tracing"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
+	svcLogger := logger.New("api")
+	slog.SetDefault(svcLogger)
+
+	ctx := context.Background()
+	shutdown, err := tracing.Init(ctx, "api")
+	if err != nil {
+		slog.Error("tracing init failed", "error", err)
+	} else {
+		defer shutdown()
+	}
+
 	cfg := config.Load()
 
 	db, err := gorm.Open(postgres.Open(cfg.DB.DSN), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		slog.Error("db connect failed", "error", err)
+		return
 	}
 	if err := db.AutoMigrate(&models.User{}, &models.Order{}, &models.Market{}, &models.Balance{}); err != nil {
-		log.Fatalf("migrate: %v", err)
+		slog.Error("migrate failed", "error", err)
+		return
 	}
 	if err := migrations.RunStoredProcedures(db); err != nil {
-		log.Fatalf("stored procedures: %v", err)
+		slog.Error("stored procedures failed", "error", err)
+		return
 	}
 
 	if err := dbseed.SeedInitialMarkets(db); err != nil {
-		log.Printf("seed markets: %v", err)
+		slog.Warn("seed markets", "error", err)
 	}
 	dbseed.SeedDefaultUsers(db)
 
@@ -57,7 +77,13 @@ func main() {
 	balanceCtrl := handler.NewBalanceController(balanceRepo)
 
 	r := chi.NewRouter()
-	r.Use(middleware.StripSlashes)
+	r.Use(otelchi.Middleware("api"))
+	r.Use(chimw.StripSlashes)
+	r.Use(chimw.RequestID)
+	r.Use(middleware.Metrics)
+
+	r.Handle("/metrics", metrics.Handler())
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 
 	r.Post("/auth/login", authCtrl.Login)
 	r.Post("/auth/register", authCtrl.Register)
@@ -80,8 +106,8 @@ func main() {
 		gr.Get("/balances", balanceCtrl.List)
 	})
 
-	log.Printf("API listening on :%s", cfg.HTTPPort)
+	slog.Info("api started", "port", cfg.HTTPPort, "metrics", "http://localhost:"+cfg.HTTPPort+"/metrics")
 	if err := http.ListenAndServe(":"+cfg.HTTPPort, r); err != nil {
-		log.Fatalf("serve: %v", err)
+		slog.Error("serve failed", "error", err)
 	}
 }

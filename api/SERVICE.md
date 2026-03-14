@@ -150,6 +150,14 @@ api/
 
 The producer uses exponential backoff with jitter (base 200ms, max 5s, 3 retries) for transient Kafka errors. It is wrapped with [sony/gobreaker](https://github.com/sony/gobreaker): after 5 consecutive publish failures the circuit opens and publish calls return immediately with `ErrOpenState`; after 30s one probe is allowed. Context cancellation is not counted as a failure so client timeouts do not open the circuit.
 
+## Observability
+
+| Concern | Implementation |
+|---------|----------------|
+| **Structured logging** | `log/slog` via `internal/logger`; `LOG_FORMAT=json`, `LOG_LEVEL=DEBUG\|INFO\|WARN\|ERROR` |
+| **Prometheus** | `GET /metrics` (no auth), `GET /health` (liveness). Metrics: `api_http_requests_total`, `api_http_request_duration_seconds`, `api_kafka_producer_messages_total` (topic, status) |
+| **Distributed tracing** | OpenTelemetry with [otelchi](https://github.com/riandyrn/otelchi); extracts trace context from gateway-injected headers and continues the span |
+
 ## Configuration
 
 | Env Var | Default | Description |

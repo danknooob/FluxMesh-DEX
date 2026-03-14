@@ -390,6 +390,34 @@ This means the same order submission can be safely retried any number of times a
 - The Go `settlement/` service is wired to consume `orders.matched` and emit `trades.settled` / `balances.updated`; connecting it to a live Ethereum RPC + deployed `ExchangeCore` is optional and controlled via environment variables (`ETH_RPC_URL`, `EXCHANGE_CORE_ADDRESS`, `SETTLEMENT_PRIVATE_KEY`, `CHAIN_ID`).
 - You do **not** need solc/Hardhat/Foundry installed just to run the backend; Solidity tooling is only required if you want to compile/deploy the contracts yourself.
 
+## Observability
+
+The gateway and API service implement **structured logging**, **Prometheus metrics**, and **OpenTelemetry distributed tracing**. Other services can follow the same pattern.
+
+### Structured logging (log/slog)
+
+- **Gateway** and **API** use Go’s `log/slog` with a configurable handler.
+- **Env**: `LOG_FORMAT=json` for JSON lines (e.g. in production); default is human-readable text. `LOG_LEVEL=DEBUG|INFO|WARN|ERROR` (default `INFO`).
+- All log lines include a `service` field. Use `slog.Info("msg", "key", value)` for key-value attributes.
+
+### Prometheus metrics
+
+| Service   | Endpoint   | Metrics |
+|----------|------------|---------|
+| **Gateway** | `GET /metrics` | `gateway_http_requests_total` (backend, method, path, status), `gateway_http_request_duration_seconds`, `gateway_circuit_breaker_open` (per backend) |
+| **API**     | `GET /metrics` | `api_http_requests_total` (method, path, status), `api_http_request_duration_seconds`, `api_kafka_producer_messages_total` (topic, status=ok\|error) |
+
+- Scrape the gateway at `http://localhost:8000/metrics` and the API at `http://localhost:8080/metrics` (or through the gateway if you expose `/metrics`).
+- The API also exposes `GET /health` for liveness; the metrics middleware skips `/metrics` and `/health` to avoid cardinality.
+
+### Distributed tracing (OpenTelemetry)
+
+- **Gateway**: Initializes a TracerProvider (stdout exporter by default; set `OTEL_EXPORTER_OTLP_ENDPOINT` to send to a collector). Uses [otelchi](https://github.com/riandyrn/otelchi) to create a span per request and injects **W3C Trace Context** into the request headers when proxying to the API and control plane.
+- **API**: Uses the same OTel SDK and otelchi; extracts trace context from incoming headers and continues the trace. Spans are exported to stderr (pretty-print) unless an OTLP endpoint is configured.
+- **End-to-end**: A request from client → gateway → API keeps a single trace ID; you can correlate gateway and API spans in Jaeger, Tempo, or any OTLP-compatible backend.
+
+To send traces to a collector, set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://localhost:4318`) and use an OTLP HTTP exporter in the tracing init (see gateway and API `internal/tracing`).
+
 ## Testing
 
 | Layer | Location | How to run |

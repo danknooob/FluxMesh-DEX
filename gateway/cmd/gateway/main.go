@@ -1,18 +1,36 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/danknooob/fluxmesh-dex/gateway/internal/logger"
+	"github.com/danknooob/fluxmesh-dex/gateway/internal/metrics"
 	"github.com/danknooob/fluxmesh-dex/gateway/internal/middleware"
 	"github.com/danknooob/fluxmesh-dex/gateway/internal/proxy"
 	"github.com/danknooob/fluxmesh-dex/gateway/internal/swagger"
+	"github.com/danknooob/fluxmesh-dex/gateway/internal/tracing"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
 )
 
 func main() {
+	svcLogger := logger.New("gateway")
+	slog.SetDefault(svcLogger)
+
+	ctx := context.Background()
+	shutdown, err := tracing.Init(ctx, "gateway")
+	if err != nil {
+		slog.Error("tracing init failed", "error", err)
+	} else {
+		defer shutdown()
+	}
+
 	port := getEnv("GATEWAY_PORT", "8000")
 	jwtSecret := getEnv("JWT_SECRET", "change-me-in-production")
 	apiTarget := getEnv("API_TARGET", "http://localhost:8080")
@@ -24,10 +42,14 @@ func main() {
 	rl := middleware.NewRateLimiter(20, 40) // 20 req/s per client, burst 40
 
 	r := chi.NewRouter()
+	r.Use(otelchi.Middleware("gateway"))
 	r.Use(chimw.StripSlashes)
 	r.Use(chimw.RealIP)
-	r.Use(chimw.Logger)
+	r.Use(chimw.RequestID)
 	r.Use(chimw.Recoverer)
+
+	// Metrics — no auth (scrape by Prometheus)
+	r.Handle("/metrics", metrics.Handler())
 
 	// Swagger UI — public, no auth
 	specPath := getEnv("SWAGGER_SPEC", "../docs/swagger.yaml")
@@ -68,12 +90,21 @@ func main() {
 		gr.Delete("/admin/*", controlProxy.ServeHTTP)
 	})
 
-	log.Printf("API Gateway listening on :%s", port)
-	log.Printf("  -> API backend:     %s", apiTarget)
-	log.Printf("  -> Control backend: %s", controlTarget)
-	log.Printf("  -> Swagger UI:      http://localhost:%s/docs", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
-		log.Fatalf("gateway: %v", err)
+	slog.Info("gateway started", "port", port, "api_target", apiTarget, "control_target", controlTarget, "docs", "http://localhost:"+port+"/docs", "metrics", "http://localhost:"+port+"/metrics")
+
+	srv := &http.Server{Addr: ":" + port, Handler: r}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("gateway server error", "error", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	slog.Info("gateway shutting down")
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("gateway shutdown error", "error", err)
 	}
 }
 

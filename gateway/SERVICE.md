@@ -32,6 +32,7 @@ Single entry-point reverse proxy that sits in front of every FluxMesh DEX backen
 
 | Method | Path | Auth | Rate Limited | Backend |
 |--------|------|------|--------------|---------|
+| `GET` | `/metrics` | No | No | Prometheus scrape |
 | `GET` | `/docs` | No | No | Swagger UI (in-process) |
 | `GET` | `/docs/swagger.yaml` | No | No | Swagger spec file |
 | `POST` | `/auth/login` | No | No | API service |
@@ -128,6 +129,14 @@ Request bodies are buffered into memory before the first attempt so they can be 
 | Half-open | 1 probe request allowed; success → closed, failure → open again |
 | When open | No upstream calls; RoundTrip returns error immediately (gateway responds with 502) |
 | Logging | State changes (closed → open, open → half-open, etc.) are logged |
+
+## Observability
+
+| Concern | Implementation |
+|---------|----------------|
+| **Structured logging** | `log/slog` via `internal/logger`; `LOG_FORMAT=json` for JSON, `LOG_LEVEL=DEBUG\|INFO\|WARN\|ERROR` |
+| **Prometheus** | `GET /metrics` (no auth). Metrics: `gateway_http_requests_total`, `gateway_http_request_duration_seconds`, `gateway_circuit_breaker_open` |
+| **Distributed tracing** | OpenTelemetry with [otelchi](https://github.com/riandyrn/otelchi); trace context is injected into proxied requests (W3C Trace Context) so the API continues the same trace |
 
 ## Configuration
 

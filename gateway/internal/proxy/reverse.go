@@ -3,7 +3,7 @@ package proxy
 import (
 	"bytes"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"math/rand"
 	"net"
@@ -12,7 +12,10 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/danknooob/fluxmesh-dex/gateway/internal/metrics"
 	"github.com/sony/gobreaker"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const (
@@ -48,17 +51,21 @@ func New(target string) http.Handler {
 			return counts.ConsecutiveFailures >= cbReadyToTrip
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			log.Printf("gateway-proxy: circuit breaker %s %v -> %v", name, from, to)
+			slog.Info("circuit breaker state change", "name", name, "from", from.String(), "to", to.String())
+			metrics.SetCircuitBreakerState(u.Host, to == gobreaker.StateOpen)
 		},
 	})
 	rp := httputil.NewSingleHostReverseProxy(u)
 	origDirector := rp.Director
+	backend := u.Host
 	rp.Director = func(req *http.Request) {
 		origDirector(req)
 		req.Host = u.Host
+		// Propagate trace context to backend for distributed tracing
+		otel.GetTextMapPropagator().Inject(req.Context(), propagation.HeaderCarrier(req.Header))
 	}
 	rp.ModifyResponse = retryableResponseCheck
-	rp.Transport = &circuitBreakerTransport{base: rt, cb: cb}
+	rp.Transport = &circuitBreakerTransport{base: rt, cb: cb, backend: backend}
 	return rp
 }
 
@@ -66,20 +73,30 @@ func New(target string) http.Handler {
 // When the circuit is open, RoundTrip returns immediately with gobreaker.ErrOpen
 // so the gateway can fail fast instead of hammering a failing upstream.
 type circuitBreakerTransport struct {
-	base http.RoundTripper
-	cb   *gobreaker.CircuitBreaker
+	base    http.RoundTripper
+	cb      *gobreaker.CircuitBreaker
+	backend string
 }
 
 func (t *circuitBreakerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
 	res, err := t.cb.Execute(func() (interface{}, error) {
 		return t.base.RoundTrip(req)
 	})
+	duration := time.Since(start)
+	method := req.Method
+	path := req.URL.Path
+	if path == "" {
+		path = "/"
+	}
 	if err != nil {
+		metrics.ObserveHTTP(t.backend, method, path, 0, duration)
 		return nil, err
 	}
 	if res == nil {
 		return nil, nil
 	}
+	metrics.ObserveHTTP(t.backend, method, path, res.(*http.Response).StatusCode, duration)
 	return res.(*http.Response), nil
 }
 
@@ -120,8 +137,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			lastErr = err
 			if isNetworkError(err) && attempt < maxRetries {
 				delay := backoff(attempt)
-				log.Printf("gateway-proxy: network error (attempt %d/%d), retrying in %v: %v",
-					attempt+1, maxRetries, delay, err)
+				slog.Warn("gateway-proxy network error, retrying", "attempt", attempt+1, "max_retries", maxRetries, "delay", delay, "error", err)
 				time.Sleep(delay)
 				continue
 			}
@@ -130,8 +146,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 		if isRetryableStatus(resp.StatusCode) && idempotent && attempt < maxRetries {
 			delay := backoff(attempt)
-			log.Printf("gateway-proxy: %d on %s %s (attempt %d/%d), retrying in %v",
-				resp.StatusCode, req.Method, req.URL.Path, attempt+1, maxRetries, delay)
+			slog.Warn("gateway-proxy upstream error, retrying", "status", resp.StatusCode, "method", req.Method, "path", req.URL.Path, "attempt", attempt+1, "max_retries", maxRetries, "delay", delay)
 			_ = resp.Body.Close()
 			time.Sleep(delay)
 			continue

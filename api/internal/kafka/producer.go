@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"math"
 	"math/rand"
 	"net"
 	"time"
 
+	"github.com/danknooob/fluxmesh-dex/api/internal/metrics"
 	"github.com/segmentio/kafka-go"
 	"github.com/sony/gobreaker"
 )
@@ -42,6 +43,9 @@ type Producer struct {
 }
 
 func NewProducer(brokers []string) *Producer {
+	if len(brokers) == 0 {
+		panic("kafka producer: at least one broker required")
+	}
 	addr := kafka.TCP(brokers[0])
 	w := func(topic string) *kafka.Writer {
 		return &kafka.Writer{Addr: addr, Topic: topic, Balancer: &kafka.LeastBytes{}}
@@ -53,7 +57,7 @@ func NewProducer(brokers []string) *Producer {
 			return counts.ConsecutiveFailures >= cbReadyToTrip
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			log.Printf("kafka-producer: circuit breaker %s %v -> %v", name, from, to)
+			slog.Info("kafka-producer circuit breaker state change", "name", name, "from", from.String(), "to", to.String())
 		},
 		// Don't count context cancellation as failure so client timeouts don't open the circuit.
 		IsSuccessful: func(err error) bool {
@@ -97,27 +101,32 @@ func (p *Producer) writeJSON(ctx context.Context, w *kafka.Writer, payload inter
 			return nil, w.WriteMessages(ctx, msg)
 		})
 		if err != nil {
-			if errors.Is(err, gobreaker.ErrOpenState) {
+			// Circuit open or half-open (too many probes): fail fast, do not retry
+			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+				metrics.ObserveKafkaPublish(w.Topic, err)
 				return err
 			}
 			if !isTransient(err) {
+				metrics.ObserveKafkaPublish(w.Topic, err)
 				return err
 			}
 			if attempt == maxRetries {
 				break
 			}
 			delay := backoff(attempt)
-			log.Printf("kafka-producer: transient error on %s (attempt %d/%d), retrying in %v: %v",
-				w.Topic, attempt+1, maxRetries, delay, err)
+			slog.Warn("kafka-producer transient error, retrying", "topic", w.Topic, "attempt", attempt+1, "max_retries", maxRetries, "delay", delay, "error", err)
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
+				metrics.ObserveKafkaPublish(w.Topic, ctx.Err())
 				return ctx.Err()
 			}
 			continue
 		}
+		metrics.ObserveKafkaPublish(w.Topic, nil)
 		return nil
 	}
+	metrics.ObserveKafkaPublish(w.Topic, err)
 	return err
 }
 
@@ -142,8 +151,11 @@ func backoff(attempt int) time.Duration {
 }
 
 func (p *Producer) Close() error {
-	_ = p.createdWriter.Close()
-	_ = p.cancelledWriter.Close()
-	_ = p.userUpdWriter.Close()
-	return p.userDelWriter.Close()
+	var firstErr error
+	for _, w := range []*kafka.Writer{p.createdWriter, p.cancelledWriter, p.userUpdWriter, p.userDelWriter} {
+		if err := w.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
