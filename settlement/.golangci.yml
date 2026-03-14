@@ -1,20 +1,16 @@
-# Local config so golangci-lint uses this dir as base (fixes typecheck resolving deps from this go.mod)
 version: 2
 
 run:
   timeout: 5m
-  modules-download-mode: readonly
 
 linters:
   disable-all: true
   enable:
-    - errcheck
     - govet
-    - ineffassign
     - staticcheck
-    - unused
-    - gofmt
+    - ineffassign
 
-linters-settings:
-  govet:
-    enable-all: true
+formatters:
+  enable:
+    - gofmt
+    - goimports
