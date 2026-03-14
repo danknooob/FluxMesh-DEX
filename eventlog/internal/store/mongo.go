@@ -54,7 +54,7 @@ func NewMongoStore(ctx context.Context, uri, database string) (EventStore, error
 		{Keys: bson.D{bson.E{Key: "title", Value: 1}}},
 		{Keys: bson.D{bson.E{Key: "stored_at", Value: 1}}},
 	}
-	_ = coll.Indexes().CreateMany(ctx, indexModels)
+	_, _ = coll.Indexes().CreateMany(ctx, indexModels)
 
 	return &mongoStore{client: client, coll: coll}, nil
 }
