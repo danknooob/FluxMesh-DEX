@@ -52,7 +52,7 @@ func main() {
 		MinBytes: 1,
 		MaxBytes: 10e6,
 	})
-	defer cancelledReader.Close()
+	defer func() { _ = cancelledReader.Close() }()
 
 	var wg sync.WaitGroup
 
