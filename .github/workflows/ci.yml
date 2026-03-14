@@ -13,6 +13,8 @@ jobs:
     strategy:
       matrix:
         service: [api, gateway, matching-engine, indexer, settlement, notification, eventlog, mcp]
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
@@ -20,15 +22,16 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache-dependency-path: ${{ matrix.service }}/go.sum
+
+      - name: Download deps
+        run: go mod download
+        working-directory: ${{ matrix.service }}
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.55.2
           working-directory: ${{ matrix.service }}
-        env:
-          GOTOOLCHAIN: local
 
   test-go:
     name: Test Go (${{ matrix.service }})
@@ -36,6 +39,8 @@ jobs:
     strategy:
       matrix:
         service: [api, gateway, matching-engine, indexer, settlement, notification, eventlog, mcp]
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
@@ -43,13 +48,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache-dependency-path: ${{ matrix.service }}/go.sum
 
       - name: Download deps
         run: go mod download
         working-directory: ${{ matrix.service }}
-        env:
-          GOTOOLCHAIN: local
 
       - name: Test
         run: go test ./... -count=1 -race -short

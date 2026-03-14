@@ -1,0 +1,6 @@
+# Keep go.mod and go.sum; ignore repo metadata and docs
+.git
+.gitignore
+*.md
+Dockerfile
+.dockerignore
