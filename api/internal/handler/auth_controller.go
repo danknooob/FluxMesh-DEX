@@ -69,7 +69,7 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(authResponse{
+	_ = json.NewEncoder(w).Encode(authResponse{
 		AccessToken: token,
 		Role:        string(user.Role),
 		UserID:      user.ID.String(),
@@ -117,7 +117,7 @@ func (c *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(authResponse{
+	_ = json.NewEncoder(w).Encode(authResponse{
 		AccessToken: token,
 		Role:        string(user.Role),
 		UserID:      user.ID.String(),

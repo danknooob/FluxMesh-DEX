@@ -36,7 +36,7 @@ func (c *ProfileController) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	_ = json.NewEncoder(w).Encode(user)
 }
 
 func (c *ProfileController) Update(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +67,7 @@ func (c *ProfileController) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	_ = json.NewEncoder(w).Encode(user)
 }
 
 func (c *ProfileController) Delete(w http.ResponseWriter, r *http.Request) {
