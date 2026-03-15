@@ -70,11 +70,11 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 
 	order, duplicate, err := c.orderService.CreateLimitOrder(r.Context(), req)
 	if err != nil {
-		switch {
-		case err == service.ErrMarketNotFound:
+		switch err {
+		case service.ErrMarketNotFound:
 			http.Error(w, "market not found", http.StatusNotFound)
 			return
-		case err == service.ErrMarketDisabled || err == service.ErrInvalidSide:
+		case service.ErrMarketDisabled, service.ErrInvalidSide:
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		default:
