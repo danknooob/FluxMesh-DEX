@@ -41,6 +41,14 @@ func main() {
 	balanceCons := notifyKafka.NewTypedConsumer(brokers, "balances.updated", "balance_updated", h)
 	go balanceCons.Run(ctx)
 
+	// Real-time order book depth: broadcast depth_updated to all clients when the book changes.
+	depthCreated := notifyKafka.NewDepthBroadcastConsumer(brokers, "orders.created", h)
+	go depthCreated.Run(ctx)
+	depthCancelled := notifyKafka.NewDepthBroadcastConsumer(brokers, "orders.cancelled", h)
+	go depthCancelled.Run(ctx)
+	depthMatched := notifyKafka.NewDepthBroadcastConsumer(brokers, "orders.matched", h)
+	go depthMatched.Run(ctx)
+
 	jwtSecret := getEnv("JWT_SECRET", "change-me-in-production")
 
 	mux := http.NewServeMux()

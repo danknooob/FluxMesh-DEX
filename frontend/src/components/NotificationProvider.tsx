@@ -55,7 +55,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           addToast(
             'Balance Updated',
             `${msg.asset ?? 'Asset'} balance changed`,
-            '#38bdf8',
+            '#2563eb',
           );
           break;
         default:
@@ -98,8 +98,8 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
           key={t.id}
           style={{
             pointerEvents: 'auto',
-            background: '#1e293b',
-            border: `1px solid ${t.color}44`,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
             borderLeft: `4px solid ${t.color}`,
             borderRadius: 10,
             padding: '0.7rem 1rem',
@@ -112,7 +112,7 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
           <div style={{ fontWeight: 600, fontSize: '0.85rem', color: t.color, marginBottom: '0.15rem' }}>
             {t.title}
           </div>
-          <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             {t.body}
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { ThemeProvider } from './theme/ThemeContext';
 import { AuthProvider } from './auth/AuthContext';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { NotificationProvider } from './components/NotificationProvider';
@@ -17,6 +18,7 @@ import { AdminHealth } from './pages/admin/AdminHealth';
 function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <NotificationProvider>
         <Routes>
@@ -58,6 +60,7 @@ function App() {
         </Routes>
         </NotificationProvider>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

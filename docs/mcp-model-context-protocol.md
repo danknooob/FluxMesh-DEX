@@ -29,7 +29,11 @@ The server uses stdin/stdout. Configure your AI client to run this command; it w
 
 ## Cursor Integration
 
-In Cursor, add a custom MCP server that runs `go run ./cmd/fluxmesh-mcp` (or the built binary) from the `mcp/` directory.
+This repo includes a project-level MCP config so Cursor (and Cloud Agents) can use the FluxMesh DEX tools without extra setup.
+
+- **Config file:** [`.cursor/mcp.json`](../.cursor/mcp.json) — defines the `fluxmesh-dex` MCP server (runs `go run ./cmd/fluxmesh-mcp` from the `mcp/` directory).
+- **Restart Cursor** after changing MCP config for it to take effect.
+- Ensure the API and Control Plane are reachable at `API_BASE_URL` and `CONTROL_BASE_URL` (defaults: `http://localhost:8080`, `http://localhost:8081`) when using the tools.
 
 ## Implementation
 

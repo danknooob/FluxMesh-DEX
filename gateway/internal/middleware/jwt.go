@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -27,9 +28,15 @@ type Claims struct {
 func JWTAuth(secret string, requireAdmin bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeJSONError := func(code int, msg string) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(code)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+			}
+
 			h := r.Header.Get("Authorization")
 			if h == "" || !strings.HasPrefix(h, "Bearer ") {
-				http.Error(w, `{"error":"missing or invalid authorization header"}`, http.StatusUnauthorized)
+				writeJSONError(http.StatusUnauthorized, "missing or invalid authorization header")
 				return
 			}
 
@@ -38,18 +45,18 @@ func JWTAuth(secret string, requireAdmin bool) func(http.Handler) http.Handler {
 				return []byte(secret), nil
 			})
 			if err != nil {
-				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				writeJSONError(http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
 
 			claims, ok := token.Claims.(*Claims)
 			if !ok || !token.Valid {
-				http.Error(w, `{"error":"invalid token claims"}`, http.StatusUnauthorized)
+				writeJSONError(http.StatusUnauthorized, "invalid token claims")
 				return
 			}
 
 			if requireAdmin && claims.Role != "admin" {
-				http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+				writeJSONError(http.StatusForbidden, "admin access required")
 				return
 			}
 

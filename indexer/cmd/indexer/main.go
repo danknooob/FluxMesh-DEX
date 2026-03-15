@@ -25,7 +25,7 @@ const (
 )
 
 func main() {
-	dsn := getEnv("DB_DSN", "postgres://dex:dex@localhost:5432/fluxmesh?sslmode=disable")
+	dsn := getEnv("DB_DSN", "host=localhost user=fluxmesh password=fluxmesh_secret dbname=fluxmesh port=5432 sslmode=disable")
 	brokers := strings.Split(getEnv("KAFKA_BROKERS", "localhost:9092"), ",")
 	port := getEnv("INDEXER_PORT", "8082")
 

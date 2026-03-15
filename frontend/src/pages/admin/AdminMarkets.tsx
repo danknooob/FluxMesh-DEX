@@ -19,7 +19,8 @@ export function AdminMarkets() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    apiFetch('/control/admin/markets')
+    // Use API /markets (same data as control plane, works when API is running and has seeded markets)
+    apiFetch('/api/markets')
       .then(async (r) => {
         if (!r.ok) {
           throw new Error('Failed to load markets config');
@@ -33,45 +34,53 @@ export function AdminMarkets() {
 
   return (
     <div>
-      <h1 style={{ marginBottom: '1rem' }}>Config</h1>
-      <p style={{ color: '#94a3b8', marginBottom: '1rem' }}>
+      <h1 style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>Config</h1>
+      <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>
         Markets, risk limits, feature flags. Desired state is owned by the control plane and broadcast on{' '}
-        <code>control.config</code>.
+        <code style={{ background: 'var(--border-subtle)', padding: '0.1rem 0.35rem', borderRadius: 4 }}>control.config</code>.
       </p>
 
-      {loading && <p>Loading markets…</p>}
-      {error && <p style={{ color: '#f97373' }}>{error}</p>}
+      {loading && <p style={{ color: 'var(--text-muted)' }}>Loading markets…</p>}
+      {error && <p style={{ color: 'var(--error)' }}>{error}</p>}
 
       {!loading && !error && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #334155' }}>
-              <th style={{ textAlign: 'left', padding: '0.4rem' }}>Market</th>
-              <th style={{ textAlign: 'left', padding: '0.4rem' }}>Tick</th>
-              <th style={{ textAlign: 'left', padding: '0.4rem' }}>Min size</th>
-              <th style={{ textAlign: 'left', padding: '0.4rem' }}>Fee</th>
-              <th style={{ textAlign: 'left', padding: '0.4rem' }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {markets.map((m) => (
-              <tr key={m.id} style={{ borderBottom: '1px solid #1e293b' }}>
-                <td style={{ padding: '0.4rem' }}>
-                  <strong>
-                    {m.base_asset}/{m.quote_asset}
-                  </strong>{' '}
-                  <span style={{ color: '#64748b' }}>({m.id})</span>
-                </td>
-                <td style={{ padding: '0.4rem' }}>{m.tick_size}</td>
-                <td style={{ padding: '0.4rem' }}>{m.min_size ?? '—'}</td>
-                <td style={{ padding: '0.4rem' }}>{m.fee_rate}</td>
-                <td style={{ padding: '0.4rem', color: m.enabled ? '#4ade80' : '#f97373' }}>
-                  {m.enabled ? 'Enabled' : 'Disabled'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        markets.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)' }}>
+            No markets yet. Start the API service so it can seed default markets (BTC-USDC, ETH-USDC, etc.).
+          </p>
+        ) : (
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'var(--bg-card)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-page)' }}>
+                  <th style={{ textAlign: 'left', padding: '0.6rem 0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Market</th>
+                  <th style={{ textAlign: 'left', padding: '0.6rem 0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Tick</th>
+                  <th style={{ textAlign: 'left', padding: '0.6rem 0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Min size</th>
+                  <th style={{ textAlign: 'left', padding: '0.6rem 0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Fee</th>
+                  <th style={{ textAlign: 'left', padding: '0.6rem 0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {markets.map((m) => (
+                  <tr key={m.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <td style={{ padding: '0.6rem 0.8rem', color: 'var(--text-primary)' }}>
+                      <strong>
+                        {m.base_asset}/{m.quote_asset}
+                      </strong>{' '}
+                      <span style={{ color: 'var(--text-muted)' }}>({m.id})</span>
+                    </td>
+                    <td style={{ padding: '0.6rem 0.8rem', color: 'var(--text-primary)' }}>{m.tick_size}</td>
+                    <td style={{ padding: '0.6rem 0.8rem', color: 'var(--text-primary)' }}>{m.min_size ?? '—'}</td>
+                    <td style={{ padding: '0.6rem 0.8rem', color: 'var(--text-primary)' }}>{m.fee_rate}</td>
+                    <td style={{ padding: '0.6rem 0.8rem', color: m.enabled ? 'var(--success)' : 'var(--error)' }}>
+                      {m.enabled ? 'Enabled' : 'Disabled'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </div>
   );

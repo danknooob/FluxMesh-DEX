@@ -1,6 +1,6 @@
 # FluxMesh DEX — Event-Driven Order-Book DEX
 
-Production-grade, event-driven order-book DEX backend with an **API Gateway** (JWT auth + per-user rate limiting), Kafka data plane, **MongoDB event log**, a control plane for config/health/operations, and an **MCP (Model Context Protocol)** server so AI assistants can query markets, balances, and health.
+Production-grade, event-driven order-book DEX with a **React frontend** (Sellora-style UI, dark/light theme), **API Gateway** (JWT auth + per-user rate limiting), Kafka data plane, **MongoDB event log**, a control plane for config/health/operations, and an **MCP (Model Context Protocol)** server so AI assistants can query markets, balances, and health.
 
 ## Architecture Overview
 
@@ -61,7 +61,7 @@ Kafka topics → Event Log Service → MongoDB (immutable audit trail)
 | `notification/` | WebSocket service; consumes domain + notification topics ([SERVICE.md](notification/SERVICE.md)) |
 | `eventlog/` | Kafka → MongoDB event logger; subscribes to all topics and persists every event ([SERVICE.md](eventlog/SERVICE.md)) |
 | `mcp/` | Control plane HTTP API + MCP (Model Context Protocol) server with DEX tools for AI ([SERVICE.md](mcp/SERVICE.md)) |
-| `frontend/` | React — public Home, Trader UI, Admin UI |
+| `frontend/` | React (Vite) — public Home, Login/Register, Trader UI (Markets, Order Book, Balances), Admin UI; Sellora-style theme with dark/light mode |
 
 ## API Gateway
 
@@ -125,6 +125,7 @@ The `notification/` service exposes a JWT-authenticated WebSocket endpoint used 
 - **Endpoint**: `ws://localhost:8090/ws?token=<jwt>`
 - **Auth**: The token is the same JWT issued by the API; it is validated server-side using `JWT_SECRET` and the `sub` claim becomes the user id.
 - **Topics bridged**: `notifications.user`, `orders.matched`, `orders.cancelled`, `balances.updated` → pushed to the correct user via an in-memory hub.
+- **Depth updates**: The notification service also consumes `orders.created`, `orders.cancelled`, and `orders.matched` to broadcast a generic `depth_updated` message (with `market_id`) so the frontend can refresh order book depth in real time without polling.
 - **Frontend**: `useWebSocket` hook maintains an auto-reconnecting connection; `NotificationProvider` shows small toasts and triggers live refresh of the Order Book (depth + open orders) and Balances pages.
 
 ## Quick Start
@@ -170,7 +171,7 @@ The `notification/` service exposes a JWT-authenticated WebSocket endpoint used 
    ```bash
    cd frontend && npm install && npm run dev
    ```
-   Vite dev server on `:3000`, proxies `/api` and `/control` to the gateway.
+   Vite dev server on `:3000`. Proxies `/api` and `/control` to the gateway by default; set `VITE_PROXY_API_TARGET=http://localhost:8080` to point directly at the API.
 
 8. **Control plane**
    ```bash
@@ -181,6 +182,7 @@ The `notification/` service exposes a JWT-authenticated WebSocket endpoint used 
    ```bash
    cd mcp && go run ./cmd/fluxmesh-mcp
    ```
+   This repo includes a project-level Cursor MCP config at [`.cursor/mcp.json`](.cursor/mcp.json) so Cursor (and Cloud Agents) can use the FluxMesh DEX tools without extra setup. Restart Cursor after changing MCP config.
 
 10. **Notification WebSocket**
     ```bash
@@ -195,6 +197,8 @@ The `notification/` service exposes a JWT-authenticated WebSocket endpoint used 
 3. All subsequent requests include `Authorization: Bearer <access_token>`
 4. Gateway validates the token and injects identity headers for downstream services
 5. React frontend stores the token in `localStorage` and attaches it via `apiFetch()` wrapper
+
+The login/register UI is email-only (no social sign-in). Register flow includes a required “I agree to the Terms of Service and Privacy Policy” checkbox.
 
 ### User Profile
 
@@ -213,17 +217,27 @@ The `notification/` service exposes a JWT-authenticated WebSocket endpoint used 
 - **Per IP (unauthenticated)**: Same limits, keyed by IP
 - **Response on limit exceeded**: `429 Too Many Requests` with `Retry-After: 1` header
 
-## Frontend Routing
+## Frontend Routing & UI
 
 | Path | Auth Required | Description |
 |------|:---:|-------------|
 | `/` | No | Public landing page |
-| `/login` | No | Sign-in / Register form |
-| `/trade/markets` | Yes | Market list |
-| `/trade/markets/:id` | Yes | Order book + place orders |
-| `/trade/balances` | Yes | User balances |
+| `/login` | No | Sign-in / Register (split layout: hero + form); theme toggle in header |
+| `/trade/markets` | Yes | Market list (card grid); theme-aware |
+| `/trade/markets/:id` | Yes | Order book + place orders; mid price + global price (CoinGecko); real-time depth via WebSocket |
+| `/trade/balances` | Yes | User balances (API returns `[]` when empty, never `null`) |
 | `/trade/profile` | Yes | View/edit profile, delete account |
 | `/admin/*` | Yes (admin) | Config, health dashboard |
+
+The frontend uses a **Sellora-style** light theme by default with **dark/light mode** toggle in the header (and on the login page). Theme preference is persisted in `localStorage` (`fluxmesh-theme`) and respects system preference on first visit. All main pages and toasts use CSS variables so they switch correctly between themes.
+
+### Real-time currency data (polling)
+
+We use **polling** for approximate real-time **external spot prices** (e.g. **CoinGecko API**) so the order book screen can show a **global price** alongside the local mid price from the DEX order book. The frontend polls the external API on an interval to keep the displayed currency quote roughly up to date without running a separate feed service. Order book depth itself is still updated in real time via **WebSocket** (from the notification service); only the external reference price uses polling.
+
+### MCP and Stitch-inspired creative frontend
+
+We integrated **MCP (Model Context Protocol)** so AI assistants (including Cursor and Stitch-style workflows) can query markets, balances, and system health. That integration also informed a **creative, modern frontend**: the landing page, markets grid, and login flow take inspiration from **Stitch** (e.g. [stitch.withgoogle.com](https://stitch.withgoogle.com)) and similar dashboard-style products — hero sections, feature cards, clear CTAs, and a cohesive layout. The MCP server (`mcp/`) exposes tools that AI tools can call; the same APIs power both the trader UI and AI-driven flows, keeping the frontend and automation experience consistent.
 
 ## Order Cancellation
 
@@ -460,7 +474,7 @@ The gateway serves a **Swagger UI** at `http://localhost:8000/docs` — interact
 - `docs/kafka-topics.md` — All Kafka topics, consumer groups, offset strategy
 - `docs/sequence-order-lifecycle.md` — Order lifecycle sequence diagram
 - `docs/sequence-config-lifecycle.md` — Config change lifecycle sequence diagram
-- `docs/mcp-model-context-protocol.md` — MCP server and tools for AI
+- `docs/mcp-model-context-protocol.md` — MCP server and tools for AI; Cursor config at `.cursor/mcp.json`
 - `docs/swagger.yaml` — OpenAPI 3.0 specification
 
 ## License

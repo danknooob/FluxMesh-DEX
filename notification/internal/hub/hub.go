@@ -19,20 +19,22 @@ type Client struct {
 
 // Hub maintains active clients and broadcasts messages to them.
 type Hub struct {
-	mu       sync.RWMutex
-	clients  map[string]map[*Client]struct{} // userId -> set of clients
-	register   chan *Client
-	unregister chan *Client
-	broadcast  chan Message
+	mu          sync.RWMutex
+	clients     map[string]map[*Client]struct{} // userId -> set of clients
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan Message
+	broadcastAll chan []byte
 }
 
 // NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[string]map[*Client]struct{}),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		broadcast:  make(chan Message, 1024),
+		clients:     make(map[string]map[*Client]struct{}),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		broadcast:   make(chan Message, 1024),
+		broadcastAll: make(chan []byte, 256),
 	}
 }
 
@@ -69,6 +71,18 @@ func (h *Hub) Run() {
 					log.Printf("notification: dropping message for user %s (slow client)", msg.UserID)
 				}
 			}
+		case data := <-h.broadcastAll:
+			h.mu.RLock()
+			for _, set := range h.clients {
+				for client := range set {
+					select {
+					case client.Send <- data:
+					default:
+						log.Printf("notification: dropping broadcast (slow client)")
+					}
+				}
+			}
+			h.mu.RUnlock()
 		}
 	}
 }
@@ -86,5 +100,14 @@ func (h *Hub) Unregister(c *Client) {
 // Broadcast enqueues a message to all clients for a given user.
 func (h *Hub) Broadcast(userID string, data []byte) {
 	h.broadcast <- Message{UserID: userID, Data: data}
+}
+
+// BroadcastAll enqueues a message to every connected client (e.g. depth_updated).
+func (h *Hub) BroadcastAll(data []byte) {
+	select {
+	case h.broadcastAll <- data:
+	default:
+		log.Printf("notification: broadcastAll channel full, dropping depth update")
+	}
 }
 

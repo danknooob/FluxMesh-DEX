@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fluxmesh-dex": {
+      "command": "go",
+      "args": ["run", "./cmd/fluxmesh-mcp"],
+      "cwd": "mcp",
+      "env": {
+        "API_BASE_URL": "http://localhost:8080",
+        "CONTROL_BASE_URL": "http://localhost:8081"
+      }
+    }
+  }
+}

@@ -20,5 +20,12 @@ func (r *BalanceRepository) ListByUser(ctx context.Context, userID string) ([]mo
 	err := r.db.WithContext(ctx).
 		Raw("SELECT * FROM fn_list_balances_by_user($1)", userID).
 		Scan(&out).Error
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	// Ensure callers get a non-nil slice so JSON encodes as [] not null.
+	if out == nil {
+		out = []models.Balance{}
+	}
+	return out, nil
 }

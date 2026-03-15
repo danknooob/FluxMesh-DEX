@@ -27,7 +27,18 @@ type Order = {
   created_at: string;
 };
 
-const POLL_INTERVAL = 5000;
+const POLL_INTERVAL_MS = 30_000;  // fallback when no WebSocket depth_updated
+const POLL_BACKOFF_MS = 60_000;
+
+const COINGECKO_IDS: Record<string, string> = {
+  BTC: 'bitcoin',
+  ETH: 'ethereum',
+  SOL: 'solana',
+  ARB: 'arbitrum',
+  OP: 'optimism',
+};
+const GLOBAL_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price';
+const GLOBAL_PRICE_POLL_MS = 60_000; // poll every 60s to avoid rate limits
 
 export function OrderBook() {
   const { marketId } = useParams<{ marketId: string }>();
@@ -37,6 +48,8 @@ export function OrderBook() {
   const [depth, setDepth] = useState<Depth | null>(null);
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [pollIntervalMs, setPollIntervalMs] = useState(POLL_INTERVAL_MS);
+  const [globalPriceUsd, setGlobalPriceUsd] = useState<number | null>(null);
 
   const { subscribe } = useNotifications();
 
@@ -60,28 +73,70 @@ export function OrderBook() {
       .finally(() => setLoading(false));
   }, [marketId]);
 
+  useEffect(() => {
+    if (!market?.base_asset) return;
+    const cgId = COINGECKO_IDS[market.base_asset.toUpperCase()];
+    if (!cgId) {
+      setGlobalPriceUsd(null);
+      return;
+    }
+    const fetchGlobal = () => {
+      const params = new URLSearchParams({ ids: cgId, vs_currencies: 'usd' });
+      fetch(`${GLOBAL_PRICE_URL}?${params}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data: Record<string, { usd?: number }> | null) => {
+          const price = data?.[cgId]?.usd;
+          setGlobalPriceUsd(price ?? null);
+        })
+        .catch(() => setGlobalPriceUsd(null));
+    };
+    fetchGlobal();
+    const id = setInterval(fetchGlobal, GLOBAL_PRICE_POLL_MS);
+    return () => clearInterval(id);
+  }, [market?.base_asset]);
+
   const fetchDepth = useCallback(() => {
     if (!marketId) return;
     apiFetch(`/api/markets/${encodeURIComponent(marketId)}/depth?limit=15`)
-      .then((r) => (r.ok ? (r.json() as Promise<Depth>) : Promise.resolve(null)))
+      .then((r) => {
+        if (r.ok) {
+          setPollIntervalMs(POLL_INTERVAL_MS);
+          return r.json() as Promise<Depth>;
+        }
+        setPollIntervalMs(POLL_BACKOFF_MS);
+        return null;
+      })
       .then((d) => { if (d) setDepth(d); })
-      .catch(() => {});
+      .catch(() => setPollIntervalMs(POLL_BACKOFF_MS));
   }, [marketId]);
 
   const fetchMyOrders = useCallback(() => {
     if (!marketId) return;
     apiFetch(`/api/orders?market_id=${encodeURIComponent(marketId)}`)
-      .then((r) => (r.ok ? (r.json() as Promise<Order[]>) : Promise.resolve([])))
-      .then(setMyOrders)
-      .catch(() => {});
+      .then((r) => {
+        if (r.ok) {
+          setPollIntervalMs(POLL_INTERVAL_MS);
+          return r.json() as Promise<Order[] | null>;
+        }
+        setPollIntervalMs(POLL_BACKOFF_MS);
+        return null;
+      })
+      .then((data) => setMyOrders(Array.isArray(data) ? data : []))
+      .catch(() => {
+        setPollIntervalMs(POLL_BACKOFF_MS);
+        setMyOrders([]);
+      });
   }, [marketId]);
 
   useEffect(() => {
     fetchDepth();
     fetchMyOrders();
-    const id = setInterval(() => { fetchDepth(); fetchMyOrders(); }, POLL_INTERVAL);
+    const id = setInterval(() => {
+      fetchDepth();
+      fetchMyOrders();
+    }, pollIntervalMs);
     return () => clearInterval(id);
-  }, [fetchDepth, fetchMyOrders]);
+  }, [fetchDepth, fetchMyOrders, pollIntervalMs]);
 
   useEffect(() => {
     return subscribe((msg) => {
@@ -89,8 +144,12 @@ export function OrderBook() {
         fetchDepth();
         fetchMyOrders();
       }
+      if (msg.type === 'depth_updated' && msg.market_id === marketId) {
+        fetchDepth();
+        fetchMyOrders();
+      }
     });
-  }, [subscribe, fetchDepth, fetchMyOrders]);
+  }, [subscribe, fetchDepth, fetchMyOrders, marketId]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -136,28 +195,45 @@ export function OrderBook() {
       ? `${market.base_asset}/${market.quote_asset}`
       : marketId ?? '…';
 
+  const bestBid = depth?.bids?.[0]?.price;
+  const bestAsk = depth?.asks?.[0]?.price;
+  const midPrice =
+    bestBid != null && bestAsk != null
+      ? (parseFloat(bestBid) + parseFloat(bestAsk)) / 2
+      : null;
+
   const maxDepthSize = Math.max(
     ...(depth?.bids ?? []).map((l) => parseFloat(l.total_size) || 0),
     ...(depth?.asks ?? []).map((l) => parseFloat(l.total_size) || 0),
     1,
   );
 
-  const openOrders = myOrders.filter((o) => o.status === 'pending' || o.status === 'partial');
+  const openOrders = (myOrders ?? []).filter((o) => o.status === 'pending' || o.status === 'partial');
 
   return (
     <div style={{ display: 'grid', gap: '1.25rem' }}>
-      {/* Row 1: Market info header */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.4rem' }}>{title}</h1>
+      {/* Row 1: Market info header + prices */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '1rem' }}>
+        <h1 style={{ margin: 0, fontSize: '1.4rem', color: 'var(--text-primary)' }}>{title}</h1>
         {market && (
-          <span style={{ color: '#64748b', fontSize: '0.85rem' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             tick {market.tick_size} · fee {market.fee_rate} · {market.enabled ? 'live' : 'disabled'}
+          </span>
+        )}
+        {midPrice != null && !Number.isNaN(midPrice) && (
+          <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Mid <strong style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{midPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> {market?.quote_asset ?? ''}
+          </span>
+        )}
+        {globalPriceUsd != null && (
+          <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            Global <strong style={{ color: 'var(--accent)', fontFamily: 'monospace' }}>${globalPriceUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> USD
           </span>
         )}
       </div>
 
-      {loading && <p style={{ color: '#94a3b8' }}>Loading market…</p>}
-      {!loading && !market && <p style={{ color: '#f97373' }}>Market not found.</p>}
+      {loading && <p style={{ color: 'var(--text-muted)' }}>Loading market…</p>}
+      {!loading && !market && <p style={{ color: 'var(--error)' }}>Market not found.</p>}
 
       {market && (
         <>
@@ -166,7 +242,7 @@ export function OrderBook() {
             {/* Bids (buy side) */}
             <section style={{ ...cardStyle }}>
               <h3 style={sectionTitle}>
-                Bids <span style={{ color: '#22c55e', fontWeight: 400, fontSize: '0.8rem' }}>buy orders</span>
+                Bids <span style={{ color: '#16a34a', fontWeight: 400, fontSize: '0.8rem' }}>buy orders</span>
               </h3>
               <DepthTable levels={depth?.bids ?? []} side="buy" maxSize={maxDepthSize} />
             </section>
@@ -174,7 +250,7 @@ export function OrderBook() {
             {/* Asks (sell side) */}
             <section style={{ ...cardStyle }}>
               <h3 style={sectionTitle}>
-                Asks <span style={{ color: '#f97373', fontWeight: 400, fontSize: '0.8rem' }}>sell orders</span>
+                Asks <span style={{ color: '#dc2626', fontWeight: 400, fontSize: '0.8rem' }}>sell orders</span>
               </h3>
               <DepthTable levels={depth?.asks ?? []} side="sell" maxSize={maxDepthSize} />
             </section>
@@ -185,14 +261,16 @@ export function OrderBook() {
               <form onSubmit={onSubmit} style={{ display: 'grid', gap: '0.6rem' }}>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
                   <button type="button" className="primary-btn" style={{
-                    flex: 1, background: side === 'buy' ? '#22c55e' : '#1e293b',
-                    color: side === 'buy' ? '#0f172a' : '#e2e8f0',
-                    boxShadow: side === 'buy' ? '0 4px 14px rgba(34,197,94,0.35)' : 'none',
+                    flex: 1, background: side === 'buy' ? 'var(--success)' : 'var(--border-subtle)',
+                    color: side === 'buy' ? '#fff' : 'var(--text-muted)',
+                    boxShadow: side === 'buy' ? '0 4px 14px rgba(22,163,74,0.35)' : 'none',
+                    border: side === 'buy' ? 'none' : '1px solid var(--border)',
                   }} onClick={() => setSide('buy')}>Buy</button>
                   <button type="button" className="primary-btn" style={{
-                    flex: 1, background: side === 'sell' ? '#f97373' : '#1e293b',
-                    color: side === 'sell' ? '#0f172a' : '#e2e8f0',
-                    boxShadow: side === 'sell' ? '0 4px 14px rgba(248,113,113,0.35)' : 'none',
+                    flex: 1, background: side === 'sell' ? 'var(--error)' : 'var(--border-subtle)',
+                    color: side === 'sell' ? '#fff' : 'var(--text-muted)',
+                    boxShadow: side === 'sell' ? '0 4px 14px rgba(220,38,38,0.35)' : 'none',
+                    border: side === 'sell' ? 'none' : '1px solid var(--border)',
                   }} onClick={() => setSide('sell')}>Sell</button>
                 </div>
                 <label style={{ display: 'grid', gap: '0.2rem' }}>
@@ -209,8 +287,8 @@ export function OrderBook() {
                   style={{ opacity: submitting ? 0.7 : 1 }}>
                   {submitting ? 'Placing…' : 'Place order'}
                 </button>
-                {error && <p style={{ color: '#f97373', fontSize: '0.85rem', margin: 0 }}>{error}</p>}
-                {message && <p style={{ color: '#4ade80', fontSize: '0.85rem', margin: 0 }}>{message}</p>}
+                {error && <p style={{ color: 'var(--error)', fontSize: '0.85rem', margin: 0 }}>{error}</p>}
+                {message && <p style={{ color: 'var(--success)', fontSize: '0.85rem', margin: 0 }}>{message}</p>}
               </form>
             </section>
           </div>
@@ -219,17 +297,17 @@ export function OrderBook() {
           <section style={{ ...cardStyle }}>
             <h3 style={sectionTitle}>
               My open orders
-              <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.8rem', marginLeft: '0.5rem' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.8rem', marginLeft: '0.5rem' }}>
                 {openOrders.length} active
               </span>
             </h3>
             {openOrders.length === 0 ? (
-              <p style={{ color: '#475569', fontSize: '0.9rem' }}>No open orders for this market.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No open orders for this market.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid #1e293b' }}>
+                    <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-page)' }}>
                       <th style={thStyle}>Side</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Price</th>
                       <th style={{ ...thStyle, textAlign: 'right' }}>Size</th>
@@ -241,27 +319,27 @@ export function OrderBook() {
                   </thead>
                   <tbody>
                     {openOrders.map((o) => (
-                      <tr key={o.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ ...tdStyle, color: o.side === 'buy' ? '#22c55e' : '#f97373', fontWeight: 600 }}>
+                      <tr key={o.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                        <td style={{ ...tdStyle, color: o.side === 'buy' ? 'var(--success)' : 'var(--error)', fontWeight: 600 }}>
                           {o.side.toUpperCase()}
                         </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(o.price)}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(o.size)}</td>
-                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(o.remaining)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{fmt(o.price)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{fmt(o.size)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{fmt(o.remaining)}</td>
                         <td style={tdStyle}>
                           <span style={{
                             fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4,
-                            background: o.status === 'pending' ? '#1e3a5f' : '#1e293b',
-                            color: o.status === 'pending' ? '#38bdf8' : '#94a3b8',
+                            background: o.status === 'pending' ? 'var(--success-bg)' : 'var(--border-subtle)',
+                            color: o.status === 'pending' ? 'var(--accent)' : 'var(--text-muted)',
                           }}>{o.status}</span>
                         </td>
-                        <td style={{ ...tdStyle, textAlign: 'right', color: '#475569', fontSize: '0.8rem' }}>
+                        <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                           {new Date(o.created_at).toLocaleTimeString()}
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'center' }}>
                           <button onClick={() => onCancel(o.id)} disabled={cancelling === o.id} style={{
-                            background: 'transparent', border: '1px solid #475569', borderRadius: 6,
-                            color: '#f97373', padding: '3px 10px', fontSize: '0.8rem', cursor: 'pointer',
+                            background: 'transparent', border: '1px solid #e2e8f0', borderRadius: 6,
+                            color: '#dc2626', padding: '3px 10px', fontSize: '0.8rem', cursor: 'pointer',
                             opacity: cancelling === o.id ? 0.5 : 1,
                           }}>
                             {cancelling === o.id ? '…' : 'Cancel'}
@@ -275,15 +353,15 @@ export function OrderBook() {
             )}
 
             {/* Recent filled/cancelled orders */}
-            {myOrders.filter((o) => o.status !== 'pending' && o.status !== 'partial').length > 0 && (
+            {(myOrders ?? []).filter((o) => o.status !== 'pending' && o.status !== 'partial').length > 0 && (
               <>
-                <h4 style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: '1rem', marginBottom: '0.5rem' }}>
+                <h4 style={{ fontSize: '0.9rem', color: '#64748b', marginTop: '1rem', marginBottom: '0.5rem' }}>
                   Recent history
                 </h4>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ borderBottom: '1px solid #1e293b' }}>
+                      <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-page)' }}>
                         <th style={thStyle}>Side</th>
                         <th style={{ ...thStyle, textAlign: 'right' }}>Price</th>
                         <th style={{ ...thStyle, textAlign: 'right' }}>Size</th>
@@ -292,23 +370,23 @@ export function OrderBook() {
                       </tr>
                     </thead>
                     <tbody>
-                      {myOrders
+                      {(myOrders ?? [])
                         .filter((o) => o.status !== 'pending' && o.status !== 'partial')
                         .slice(0, 10)
                         .map((o) => (
-                          <tr key={o.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                            <td style={{ ...tdStyle, color: o.side === 'buy' ? '#22c55e' : '#f97373' }}>
+                          <tr key={o.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                            <td style={{ ...tdStyle, color: o.side === 'buy' ? 'var(--success)' : 'var(--error)' }}>
                               {o.side.toUpperCase()}
                             </td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(o.price)}</td>
-                            <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(o.size)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{fmt(o.price)}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>{fmt(o.size)}</td>
                             <td style={tdStyle}>
                               <span style={{
                                 fontSize: '0.75rem', padding: '2px 8px', borderRadius: 4,
                                 background: statusColor(o.status).bg, color: statusColor(o.status).fg,
                               }}>{o.status}</span>
                             </td>
-                            <td style={{ ...tdStyle, textAlign: 'right', color: '#475569', fontSize: '0.8rem' }}>
+                            <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                               {new Date(o.created_at).toLocaleTimeString()}
                             </td>
                           </tr>
@@ -326,11 +404,11 @@ export function OrderBook() {
 }
 
 function DepthTable({ levels, side, maxSize }: { levels: PriceLevel[]; side: 'buy' | 'sell'; maxSize: number }) {
-  const color = side === 'buy' ? '#22c55e' : '#f97373';
-  const barColor = side === 'buy' ? 'rgba(34,197,94,0.12)' : 'rgba(248,113,113,0.12)';
+  const color = side === 'buy' ? '#16a34a' : '#dc2626';
+  const barColor = side === 'buy' ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)';
 
   if (levels.length === 0) {
-    return <p style={{ color: '#475569', fontSize: '0.85rem' }}>No {side} orders</p>;
+    return <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No {side} orders</p>;
   }
 
   return (
@@ -352,7 +430,7 @@ function DepthTable({ levels, side, maxSize }: { levels: PriceLevel[]; side: 'bu
               <td style={{ ...tdStyle, textAlign: 'right', color, fontFamily: 'monospace', fontWeight: 600 }}>
                 {fmt(l.price)}
               </td>
-              <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>{fmt(l.total_size)}</td>
+              <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: '#334155' }}>{fmt(l.total_size)}</td>
               <td style={{ ...tdStyle, textAlign: 'right', color: '#64748b' }}>{l.count}</td>
             </tr>
           );
@@ -370,43 +448,45 @@ function fmt(v: string): string {
 
 function statusColor(s: string): { bg: string; fg: string } {
   switch (s) {
-    case 'matched': return { bg: '#14532d', fg: '#4ade80' };
-    case 'cancelled': return { bg: '#1e293b', fg: '#94a3b8' };
-    case 'rejected': return { bg: '#450a0a', fg: '#f97373' };
-    default: return { bg: '#1e293b', fg: '#94a3b8' };
+    case 'matched': return { bg: 'var(--success-bg)', fg: 'var(--success)' };
+    case 'cancelled': return { bg: 'var(--border-subtle)', fg: 'var(--text-muted)' };
+    case 'rejected': return { bg: 'var(--error-bg)', fg: 'var(--error)' };
+    default: return { bg: 'var(--border-subtle)', fg: 'var(--text-muted)' };
   }
 }
 
 const cardStyle: React.CSSProperties = {
-  border: '1px solid #334155',
+  border: '1px solid var(--border)',
   borderRadius: 12,
   padding: '1rem 1.25rem',
+  background: 'var(--bg-card)',
 };
 
 const sectionTitle: React.CSSProperties = {
   fontSize: '1rem',
   marginTop: 0,
   marginBottom: '0.6rem',
+  color: 'var(--text-primary)',
 };
 
 const labelStyle: React.CSSProperties = {
-  color: '#cbd5f5',
+  color: 'var(--text-primary)',
   fontSize: '0.85rem',
 };
 
 const inputStyle: React.CSSProperties = {
   padding: '0.45rem 0.55rem',
   borderRadius: 8,
-  border: '1px solid #334155',
-  background: '#020617',
-  color: '#e2e8f0',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
 };
 
 const thStyle: React.CSSProperties = {
   padding: '0.5rem 0.6rem',
   textAlign: 'left',
   fontSize: '0.75rem',
-  color: '#94a3b8',
+  color: 'var(--text-muted)',
   fontWeight: 500,
   textTransform: 'uppercase',
   letterSpacing: '0.04em',

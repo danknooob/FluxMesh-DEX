@@ -97,21 +97,21 @@ export function Profile() {
     reader.readAsDataURL(file);
   };
 
-  if (loading) return <p>Loading profile...</p>;
+  if (loading) return <p style={{ color: 'var(--text-muted)' }}>Loading profile...</p>;
 
   return (
     <div style={{ maxWidth: 520, margin: '0 auto' }}>
-      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem' }}>Profile</h1>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', color: 'var(--text-primary)' }}>Profile</h1>
 
       <div style={{
         display: 'flex', alignItems: 'center', gap: '1.25rem',
         marginBottom: '1.5rem', padding: '1rem',
-        border: '1px solid #334155', borderRadius: 12, background: '#1e293b',
+        border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg-card)',
       }}>
         <div style={{
           width: 72, height: 72, borderRadius: '50%', overflow: 'hidden',
-          background: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '1.8rem', color: '#94a3b8', flexShrink: 0,
+          background: 'var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '1.8rem', color: 'var(--text-muted)', flexShrink: 0,
         }}>
           {avatarUrl ? (
             <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -120,13 +120,13 @@ export function Profile() {
           )}
         </div>
         <div>
-          <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{name || 'No name set'}</div>
-          <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>{profile?.email}</div>
+          <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>{name || 'No name set'}</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{profile?.email}</div>
           <div style={{ marginTop: '0.25rem' }}>
             <span style={{
-              padding: '0.15rem 0.45rem', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600,
+              padding: '0.15rem 0.45rem', borderRadius: 6, fontSize: '0.7rem', fontWeight: 600,
               textTransform: 'uppercase',
-              background: profile?.role === 'admin' ? '#7c3aed' : '#0ea5e9', color: '#fff',
+              background: profile?.role === 'admin' ? '#7c3aed' : '#2563eb', color: '#fff',
             }}>{profile?.role}</span>
           </div>
         </div>
@@ -134,7 +134,7 @@ export function Profile() {
 
       <form onSubmit={onSave} style={{ display: 'grid', gap: '1rem' }}>
         <label style={{ display: 'grid', gap: '0.25rem' }}>
-          <span style={{ color: '#cbd5f5', fontSize: '0.85rem' }}>Display name</span>
+          <span style={{ color: 'var(--text-primary)', fontSize: '0.85rem' }}>Display name</span>
           <input
             type="text" value={name} onChange={(e) => setName(e.target.value)}
             placeholder="Your name"
@@ -143,7 +143,7 @@ export function Profile() {
         </label>
 
         <label style={{ display: 'grid', gap: '0.25rem' }}>
-          <span style={{ color: '#cbd5f5', fontSize: '0.85rem' }}>Email</span>
+          <span style={{ color: '#334155', fontSize: '0.85rem' }}>Email</span>
           <input
             type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             required
@@ -152,26 +152,26 @@ export function Profile() {
         </label>
 
         <label style={{ display: 'grid', gap: '0.25rem' }}>
-          <span style={{ color: '#cbd5f5', fontSize: '0.85rem' }}>Profile photo</span>
+          <span style={{ color: 'var(--text-primary)', fontSize: '0.85rem' }}>Profile photo</span>
           <input
             type="file" accept="image/*" onChange={handleAvatarFile}
-            style={{ color: '#94a3b8', fontSize: '0.85rem' }}
+            style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}
           />
-          <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Max 500KB. Stored as base64 data URL.</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Max 500KB. Stored as base64 data URL.</span>
         </label>
 
         {avatarUrl && (
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <img src={avatarUrl} alt="preview" style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
             <button type="button" onClick={() => setAvatarUrl('')}
-              style={{ background: 'none', border: 'none', color: '#f97373', cursor: 'pointer', fontSize: '0.8rem' }}>
+              style={{ background: 'none', border: 'none', color: 'var(--error)', cursor: 'pointer', fontSize: '0.8rem' }}>
               Remove photo
             </button>
           </div>
         )}
 
-        {error && <p style={{ color: '#f97373', fontSize: '0.85rem', margin: 0 }}>{error}</p>}
-        {message && <p style={{ color: '#4ade80', fontSize: '0.85rem', margin: 0 }}>{message}</p>}
+        {error && <p style={{ color: 'var(--error)', fontSize: '0.85rem', margin: 0 }}>{error}</p>}
+        {message && <p style={{ color: 'var(--success)', fontSize: '0.85rem', margin: 0 }}>{message}</p>}
 
         <button type="submit" className="primary-btn" disabled={saving}
           style={{ opacity: saving ? 0.7 : 1 }}>
@@ -181,33 +181,33 @@ export function Profile() {
 
       <div style={{
         marginTop: '2.5rem', padding: '1rem',
-        border: '1px solid #7f1d1d', borderRadius: 12, background: '#1c1017',
+        border: '1px solid #fecaca', borderRadius: 12, background: '#fef2f2',
       }}>
-        <h3 style={{ fontSize: '1rem', color: '#f97373', marginTop: 0, marginBottom: '0.5rem' }}>Danger zone</h3>
-        <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
+        <h3 style={{ fontSize: '1rem', color: '#dc2626', marginTop: 0, marginBottom: '0.5rem' }}>Danger zone</h3>
+        <p style={{ color: '#64748b', fontSize: '0.85rem', marginBottom: '0.75rem' }}>
           Permanently delete your account and all associated data. This action cannot be undone.
         </p>
         {!showDelete ? (
           <button onClick={() => setShowDelete(true)}
             style={{
-              background: 'transparent', border: '1px solid #7f1d1d', color: '#f97373',
+              background: 'transparent', border: '1px solid var(--error)', color: 'var(--error)',
               padding: '0.45rem 1rem', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
             }}>
             Delete my account
           </button>
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <span style={{ color: '#f97373', fontSize: '0.85rem' }}>Are you sure?</span>
+            <span style={{ color: 'var(--error)', fontSize: '0.85rem' }}>Are you sure?</span>
             <button onClick={onDelete}
               style={{
-                background: '#dc2626', border: 'none', color: '#fff',
+                background: 'var(--error)', border: 'none', color: '#fff',
                 padding: '0.45rem 1rem', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
               }}>
               Yes, delete
             </button>
             <button onClick={() => setShowDelete(false)}
               style={{
-                background: 'transparent', border: '1px solid #475569', color: '#94a3b8',
+                background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)',
                 padding: '0.45rem 1rem', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem',
               }}>
               Cancel
@@ -222,8 +222,8 @@ export function Profile() {
 const inputStyle: React.CSSProperties = {
   padding: '0.55rem 0.7rem',
   borderRadius: 8,
-  border: '1px solid #334155',
-  background: '#020617',
-  color: '#e2e8f0',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-input)',
+  color: 'var(--text-primary)',
   fontSize: '0.95rem',
 };

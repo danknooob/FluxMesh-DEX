@@ -74,33 +74,49 @@ type healthResponse struct {
 	Services []serviceHealth `json:"services"`
 }
 
-// Health returns aggregated service health. For now it probes the
-// indexer /health endpoint and reports others as unknown, so the
-// admin UI shows real data instead of static placeholders.
+// probeHTTP returns "healthy" if GET url returns 200 within timeout, else "unhealthy".
+func probeHTTP(client *http.Client, url string) string {
+	if url == "" {
+		return "unknown"
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "unhealthy"
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		return "healthy"
+	}
+	return "unhealthy"
+}
+
+// Health returns aggregated service health. It HTTP-probes each service that
+// exposes a /health endpoint (API, indexer). Others show "unknown" (not probed).
+// Set API_HEALTH_URL and INDEXER_HEALTH_URL to override defaults.
 func (h *AdminHandler) Health(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	apiURL := os.Getenv("API_HEALTH_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:8080/health"
+	}
 	indexerURL := os.Getenv("INDEXER_HEALTH_URL")
 	if indexerURL == "" {
 		indexerURL = "http://localhost:8082/health"
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	status := "unhealthy"
-	if resp, err := client.Get(indexerURL); err == nil && resp.StatusCode == http.StatusOK {
-		status = "healthy"
-	}
 
 	out := healthResponse{
 		Services: []serviceHealth{
-			{Name: "api", Status: "unknown"},
+			{Name: "api", Status: probeHTTP(client, apiURL)},
 			{Name: "matching-engine", Status: "unknown"},
 			{Name: "settlement", Status: "unknown"},
 			{Name: "notification", Status: "unknown"},
-			{Name: "indexer", Status: status},
+			{Name: "indexer", Status: probeHTTP(client, indexerURL)},
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")

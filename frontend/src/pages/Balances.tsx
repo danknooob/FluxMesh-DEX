@@ -14,54 +14,66 @@ export function Balances() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState(false);
   const { subscribe } = useNotifications();
 
   const fetchBalances = useCallback(() => {
+    if (authError) return;
+    setError(null);
     apiFetch('/api/balances')
       .then(async (r) => {
+        if (r.status === 401) {
+          setAuthError(true);
+          throw new Error('Unauthorized');
+        }
         if (!r.ok) throw new Error(await r.text());
-        return r.json() as Promise<Balance[]>;
+        setAuthError(false);
+        return r.json() as Promise<Balance[] | null>;
       })
-      .then(setBalances)
-      .catch((err) => setError(err?.message ?? 'Failed to load balances'))
+      .then((data) => setBalances(Array.isArray(data) ? data : []))
+      .catch((err) => {
+        setError(err?.message ?? 'Failed to load balances');
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [authError]);
 
   useEffect(() => { fetchBalances(); }, [fetchBalances]);
 
   useEffect(() => {
     return subscribe((msg) => {
+      if (authError) return;
       if (msg.type === 'balance_updated' || msg.type === 'order_filled') {
         fetchBalances();
       }
     });
-  }, [subscribe, fetchBalances]);
+  }, [subscribe, fetchBalances, authError]);
 
-  const total = balances.reduce((acc, b) => acc + parseFloat(b.available || '0') + parseFloat(b.locked || '0'), 0);
+  const total = (balances ?? []).reduce((acc, b) => acc + parseFloat(b.available ?? '0') + parseFloat(b.locked ?? '0'), 0);
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '1rem', marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0 }}>Balances</h1>
-        {!loading && balances.length > 0 && (
-          <span style={{ color: '#64748b', fontSize: '0.9rem' }}>
-            {balances.length} asset{balances.length !== 1 ? 's' : ''}
+        <h1 style={{ margin: 0, color: 'var(--text-primary)' }}>Balances</h1>
+        {!loading && (balances ?? []).length > 0 && (
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            {(balances ?? []).length} asset{(balances ?? []).length !== 1 ? 's' : ''}
           </span>
         )}
       </div>
 
-      {loading && <p style={{ color: '#94a3b8' }}>Loading balances…</p>}
-      {error && <p style={{ color: '#f97373' }}>{error}</p>}
+      {loading && <p style={{ color: 'var(--text-muted)' }}>Loading balances…</p>}
+      {error && <p style={{ color: 'var(--error)' }}>{error}</p>}
 
       {!loading && !error && balances.length === 0 && (
         <div style={{
-          border: '1px solid #334155',
+          border: '1px solid var(--border)',
           borderRadius: 12,
           padding: '2rem',
           textAlign: 'center',
-          color: '#94a3b8',
+          color: 'var(--text-muted)',
+          background: 'var(--bg-card)',
         }}>
-          <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>No balances yet</p>
+          <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem', color: 'var(--text-primary)' }}>No balances yet</p>
           <p style={{ fontSize: '0.85rem' }}>
             Balances are populated when trades settle through the matching engine and settlement pipeline.
             Place an order to get started.
@@ -69,7 +81,7 @@ export function Balances() {
         </div>
       )}
 
-      {balances.length > 0 && (
+      {(balances ?? []).length > 0 && (
         <>
           <div style={{
             display: 'grid',
@@ -78,33 +90,36 @@ export function Balances() {
             marginBottom: '1.5rem',
           }}>
             <div style={{
-              border: '1px solid #334155',
+              border: '1px solid var(--border)',
               borderRadius: 12,
               padding: '1rem 1.25rem',
+              background: 'var(--bg-card)',
             }}>
-              <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Total Value</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Total Value</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
               </div>
             </div>
             <div style={{
-              border: '1px solid #334155',
+              border: '1px solid var(--border)',
               borderRadius: 12,
               padding: '1rem 1.25rem',
+              background: 'var(--bg-card)',
             }}>
-              <div style={{ color: '#64748b', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Assets Held</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{balances.length}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '0.25rem' }}>Assets Held</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>{(balances ?? []).length}</div>
             </div>
           </div>
 
           <div style={{
-            border: '1px solid #334155',
+            border: '1px solid var(--border)',
             borderRadius: 12,
             overflow: 'hidden',
+            background: 'var(--bg-card)',
           }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid #334155', background: '#0f172a' }}>
+                <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-page)' }}>
                   <th style={thStyle}>Asset</th>
                   <th style={{ ...thStyle, textAlign: 'right' }}>Available</th>
                   <th style={{ ...thStyle, textAlign: 'right' }}>Locked</th>
@@ -112,21 +127,21 @@ export function Balances() {
                 </tr>
               </thead>
               <tbody>
-                {balances.map((b) => {
-                  const avail = parseFloat(b.available || '0');
-                  const locked = parseFloat(b.locked || '0');
+                {(balances ?? []).map((b) => {
+                  const avail = parseFloat(b.available ?? '0');
+                  const locked = parseFloat(b.locked ?? '0');
                   return (
-                    <tr key={b.asset} style={{ borderBottom: '1px solid #1e293b' }}>
+                    <tr key={b.asset ?? ''} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                       <td style={tdStyle}>
-                        <span style={{ fontWeight: 600 }}>{b.asset}</span>
+                        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{b.asset ?? '—'}</span>
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace' }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-primary)' }}>
                         {avail.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: locked > 0 ? '#fbbf24' : '#475569' }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', color: locked > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
                         {locked.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text-primary)' }}>
                         {(avail + locked).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
                       </td>
                     </tr>
@@ -136,7 +151,7 @@ export function Balances() {
             </table>
           </div>
 
-          <p style={{ color: '#475569', fontSize: '0.8rem', marginTop: '0.75rem' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.75rem' }}>
             Balances are updated asynchronously via Kafka as trades settle. Locked amounts represent funds reserved in open orders.
           </p>
         </>
@@ -149,7 +164,7 @@ const thStyle: React.CSSProperties = {
   padding: '0.75rem 1rem',
   textAlign: 'left',
   fontSize: '0.8rem',
-  color: '#94a3b8',
+  color: 'var(--text-muted)',
   fontWeight: 500,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',

@@ -454,6 +454,8 @@ $$;
 
 -- Atomically check idempotency key and insert an order.
 -- Returns the row and a boolean `is_duplicate`.
+-- Drop first so we can change return type (PostgreSQL does not allow changing it with CREATE OR REPLACE).
+DROP FUNCTION IF EXISTS fn_create_order_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION fn_create_order_atomic(
     p_idempotency_key TEXT,
     p_user_id         TEXT,
@@ -470,52 +472,117 @@ CREATE OR REPLACE FUNCTION fn_create_order_atomic(
     market_id       TEXT,
     side            TEXT,
     "type"          TEXT,
-    price           NUMERIC,
-    size            NUMERIC,
-    remaining       NUMERIC,
+    price           TEXT,
+    size            TEXT,
+    remaining       TEXT,
     status          TEXT,
-    cancel_fee      NUMERIC,
+    cancel_fee      TEXT,
     created_at      TIMESTAMPTZ,
     updated_at      TIMESTAMPTZ,
     deleted_at      TIMESTAMPTZ,
     is_duplicate    BOOLEAN
 )
 LANGUAGE plpgsql AS $$
+DECLARE
+    ins_row orders%ROWTYPE;
 BEGIN
-    -- Fast-path: idempotency check inside the same transaction
+    -- Fast-path: idempotency check. Use subquery with aliased columns to avoid 42702 (id ambiguous with RETURNS TABLE).
     IF p_idempotency_key IS NOT NULL AND p_idempotency_key <> '' THEN
         RETURN QUERY
-            SELECT o.*, TRUE
-            FROM orders o
-            WHERE o.idempotency_key = p_idempotency_key
-              AND o.deleted_at IS NULL
-            LIMIT 1;
+            SELECT sub.r_id::UUID,
+                   sub.r_idempotency_key::TEXT,
+                   sub.r_user_id::TEXT,
+                   sub.r_market_id::TEXT,
+                   sub.r_side::TEXT,
+                   sub.r_type::TEXT,
+                   sub.r_price::TEXT,
+                   sub.r_size::TEXT,
+                   sub.r_remaining::TEXT,
+                   sub.r_status::TEXT,
+                   sub.r_cancel_fee::TEXT,
+                   sub.r_created_at::TIMESTAMPTZ,
+                   sub.r_updated_at::TIMESTAMPTZ,
+                   sub.r_deleted_at::TIMESTAMPTZ,
+                   TRUE::BOOLEAN
+            FROM (
+                SELECT o.id AS r_id, o.idempotency_key AS r_idempotency_key,
+                       o.user_id AS r_user_id, o.market_id AS r_market_id,
+                       o.side AS r_side, o."type" AS r_type,
+                       o.price AS r_price, o.size AS r_size, o.remaining AS r_remaining,
+                       o.status AS r_status, COALESCE(o.cancel_fee, 0) AS r_cancel_fee,
+                       o.created_at AS r_created_at, o.updated_at AS r_updated_at,
+                       o.deleted_at AS r_deleted_at
+                FROM orders o
+                WHERE o.idempotency_key = p_idempotency_key
+                  AND o.deleted_at IS NULL
+                LIMIT 1
+            ) sub;
         IF FOUND THEN RETURN; END IF;
     END IF;
 
-    -- Insert; on unique-violation (race), return existing row
+    -- Insert; on unique-violation (race), return existing row.
+    -- Use a record variable so RETURNING * has no column names in scope (avoids 42702).
     BEGIN
-        RETURN QUERY
-            INSERT INTO orders (
-                id, idempotency_key, user_id, market_id,
-                side, "type", price, size, remaining,
-                status, created_at, updated_at
-            ) VALUES (
-                gen_random_uuid(),
-                NULLIF(p_idempotency_key, ''),
-                p_user_id, p_market_id,
-                p_side, p_type,
-                p_price::NUMERIC, p_size::NUMERIC, p_remaining::NUMERIC,
-                'pending', NOW(), NOW()
-            )
-            RETURNING *, FALSE;
+        INSERT INTO orders (
+            id, idempotency_key, user_id, market_id,
+            side, "type", price, size, remaining,
+            status, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULLIF(p_idempotency_key, ''),
+            p_user_id, p_market_id,
+            p_side, p_type,
+            p_price::NUMERIC, p_size::NUMERIC, p_remaining::NUMERIC,
+            'pending', NOW(), NOW()
+        )
+        RETURNING * INTO ins_row;
+
+        RETURN QUERY SELECT
+            ins_row.id,
+            ins_row.idempotency_key::TEXT,
+            ins_row.user_id::TEXT,
+            ins_row.market_id::TEXT,
+            ins_row.side::TEXT,
+            ins_row."type"::TEXT,
+            ins_row.price::TEXT,
+            ins_row.size::TEXT,
+            ins_row.remaining::TEXT,
+            ins_row.status::TEXT,
+            COALESCE(ins_row.cancel_fee, 0)::TEXT,
+            ins_row.created_at::TIMESTAMPTZ,
+            ins_row.updated_at::TIMESTAMPTZ,
+            ins_row.deleted_at::TIMESTAMPTZ,
+            FALSE::BOOLEAN;
     EXCEPTION WHEN unique_violation THEN
         RETURN QUERY
-            SELECT o.*, TRUE
-            FROM orders o
-            WHERE o.idempotency_key = p_idempotency_key
-              AND o.deleted_at IS NULL
-            LIMIT 1;
+            SELECT sub.r_id::UUID,
+                   sub.r_idempotency_key::TEXT,
+                   sub.r_user_id::TEXT,
+                   sub.r_market_id::TEXT,
+                   sub.r_side::TEXT,
+                   sub.r_type::TEXT,
+                   sub.r_price::TEXT,
+                   sub.r_size::TEXT,
+                   sub.r_remaining::TEXT,
+                   sub.r_status::TEXT,
+                   sub.r_cancel_fee::TEXT,
+                   sub.r_created_at::TIMESTAMPTZ,
+                   sub.r_updated_at::TIMESTAMPTZ,
+                   sub.r_deleted_at::TIMESTAMPTZ,
+                   TRUE::BOOLEAN
+            FROM (
+                SELECT o.id AS r_id, o.idempotency_key AS r_idempotency_key,
+                       o.user_id AS r_user_id, o.market_id AS r_market_id,
+                       o.side AS r_side, o."type" AS r_type,
+                       o.price AS r_price, o.size AS r_size, o.remaining AS r_remaining,
+                       o.status AS r_status, COALESCE(o.cancel_fee, 0) AS r_cancel_fee,
+                       o.created_at AS r_created_at, o.updated_at AS r_updated_at,
+                       o.deleted_at AS r_deleted_at
+                FROM orders o
+                WHERE o.idempotency_key = p_idempotency_key
+                  AND o.deleted_at IS NULL
+                LIMIT 1
+            ) sub;
     END;
 END;
 $$;

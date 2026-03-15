@@ -143,6 +143,7 @@ func (r *OrderRepository) CreateAtomic(ctx context.Context, o *models.Order) (is
 		IsDuplicate    bool           `gorm:"column:is_duplicate"`
 	}
 
+	// Function returns one row: either existing (idempotency) or newly inserted. SELECT * fetches all returned columns.
 	var rows []row
 	if err := r.db.WithContext(ctx).
 		Raw("SELECT * FROM fn_create_order_atomic($1,$2,$3,$4,$5,$6,$7,$8)",

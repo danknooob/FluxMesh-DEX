@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/auth"
 	"github.com/danknooob/fluxmesh-dex/api/internal/service"
@@ -68,12 +70,31 @@ func (c *OrderController) Create(w http.ResponseWriter, r *http.Request) {
 
 	order, duplicate, err := c.orderService.CreateLimitOrder(r.Context(), req)
 	if err != nil {
-		if err == service.ErrMarketDisabled || err == service.ErrInvalidSide {
+		switch {
+		case err == service.ErrMarketNotFound:
+			http.Error(w, "market not found", http.StatusNotFound)
+			return
+		case err == service.ErrMarketDisabled || err == service.ErrInvalidSide:
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		default:
+			log.Printf("[order] CreateLimitOrder failed: %v", err)
+			msg := err.Error()
+			switch {
+			case strings.Contains(strings.ToLower(msg), "unique") || strings.Contains(strings.ToLower(msg), "duplicate key"):
+				http.Error(w, "duplicate order (idempotency key already used)", http.StatusConflict)
+				return
+			case strings.Contains(strings.ToLower(msg), "foreign key") || strings.Contains(strings.ToLower(msg), "violates foreign key"):
+				http.Error(w, "invalid user or market", http.StatusBadRequest)
+				return
+			case strings.Contains(strings.ToLower(msg), "scan") || strings.Contains(strings.ToLower(msg), "convert"):
+				http.Error(w, "order data type error: "+msg, http.StatusInternalServerError)
+				return
+			default:
+				http.Error(w, "internal error: "+msg, http.StatusInternalServerError)
+				return
+			}
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if duplicate {

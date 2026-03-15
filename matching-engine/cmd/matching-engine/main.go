@@ -25,7 +25,7 @@ func main() {
 			brokers = parts
 		}
 	}
-	dsn := getEnv("DB_DSN", "postgres://dex:dex@localhost:5432/fluxmesh?sslmode=disable")
+	dsn := getEnv("DB_DSN", "host=localhost user=fluxmesh password=fluxmesh_secret dbname=fluxmesh port=5432 sslmode=disable")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

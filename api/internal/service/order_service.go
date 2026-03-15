@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/danknooob/fluxmesh-dex/api/internal/kafka"
 	"github.com/danknooob/fluxmesh-dex/api/internal/models"
 	"github.com/danknooob/fluxmesh-dex/api/internal/repository"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type OrderService struct {
@@ -38,8 +40,14 @@ type CreateLimitOrderRequest struct {
 // function fn_create_order_atomic, eliminating TOCTOU race conditions.
 func (s *OrderService) CreateLimitOrder(ctx context.Context, req CreateLimitOrderRequest) (*models.Order, bool, error) {
 	market, err := s.markets.GetMarket(ctx, req.MarketID)
-	if err != nil || market == nil {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, ErrMarketNotFound
+		}
 		return nil, false, err
+	}
+	if market == nil {
+		return nil, false, ErrMarketNotFound
 	}
 	if !market.Enabled {
 		return nil, false, ErrMarketDisabled
