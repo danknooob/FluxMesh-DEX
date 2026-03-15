@@ -1,5 +1,5 @@
-version: 2
-
+# API-specific lint config; inherits from repo root .golangci.yml when present.
+# Ensures lint runs consistently from api/ directory in CI.
 run:
   timeout: 5m
 
